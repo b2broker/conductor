@@ -41,9 +41,9 @@ func sender() {
 	}
 
 	msg := conductor.Request{
-		Server:   "95.179.196.205:443",
-		Login:    5,
-		Password: "Qwerty12345",
+		Server:   "*",
+		Login:    *,
+		Password: "*",
 	}
 	s, err := proto.Marshal(&msg)
 	if err != nil {
