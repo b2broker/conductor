@@ -1,6 +1,7 @@
 package rabbitmq
 
 import (
+	"fmt"
 	"log"
 
 	"github.com/streadway/amqp"
@@ -10,21 +11,25 @@ type Rabbit struct {
 	connection *amqp.Connection
 	channel    *amqp.Channel
 	consume    <-chan amqp.Delivery
-	queue      amqp.Queue
+	Queue      amqp.Queue
 }
 
-func NewRabbit(con *amqp.Connection, queueName string) (*Rabbit, error) {
+func NewRabbit(con *amqp.Connection, queueName string, exclusive bool) (*Rabbit, error) {
 
 	channelRabbitMQ, err := con.Channel()
 	if err != nil {
 		return nil, err
 	}
 
+	qName := ""
+	if exclusive == false {
+		qName = queueName
+	}
 	q, err := channelRabbitMQ.QueueDeclare(
-		queueName, // name
+		qName,     // name
 		false,     // durable
 		false,     // delete when unused
-		false,     // exclusive
+		exclusive, // exclusive
 		false,     // no-wait
 		nil,       // arguments
 	)
@@ -33,19 +38,19 @@ func NewRabbit(con *amqp.Connection, queueName string) (*Rabbit, error) {
 	}
 
 	messages, err := channelRabbitMQ.Consume(
-		queueName, // consume name
-		"",        // consumer
-		true,      // auto-ack
-		false,     // exclusive
-		false,     // no local
-		false,     // no wait
-		nil,       // arguments
+		q.Name, // consume name
+		"",     // consumer
+		true,   // auto-ack
+		false,  // exclusive
+		false,  // no local
+		false,  // no wait
+		nil,    // arguments
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Rabbit{connection: con, channel: channelRabbitMQ, consume: messages, queue: q}, nil
+	return &Rabbit{connection: con, channel: channelRabbitMQ, consume: messages, Queue: q}, nil
 }
 
 func (r *Rabbit) Stop() {
@@ -53,25 +58,38 @@ func (r *Rabbit) Stop() {
 	r.channel.Close()
 }
 
-func (r *Rabbit) Read(onMsg func([]byte) error) {
-	for message := range r.consume {
-		message.Ack(true)
-		if err := onMsg(message.Body); err != nil {
-			log.Printf(" > Received message: %s\n", message.Body)
+func (r *Rabbit) Read(onMsg func(amqp.Delivery) error) {
+	for {
+		for message := range r.consume {
+			//message.Ack(false)
+			fmt.Println("Get rabbit message")
+			if err := onMsg(message); err != nil {
+				log.Printf(" > Received message: %s\n", message.Body)
+			}
 		}
 	}
+
 }
 
-func (r *Rabbit) Publish(msg []byte) error {
+func (r *Rabbit) ReplyTo(msg amqp.Publishing, replyTo string) error {
 	err := r.channel.Publish(
-		"",           // exchange
-		r.queue.Name, // routing key
-		false,        // mandatory
-		false,        // immediate
-		amqp.Publishing{
-			ContentType: "text/plain",
-			Body:        msg,
-		})
+		"",      // exchange
+		replyTo, // routing key
+		false,   // mandatory
+		false,   // immediate
+		msg)
+
+	return err
+}
+
+func (r *Rabbit) Publish(msg amqp.Publishing) error {
+	fmt.Println("Queue name: ", r.Queue.Name)
+	err := r.channel.Publish(
+		"",       // exchange
+		"test_q", // routing key
+		false,    // mandatory
+		false,    // immediate
+		msg)
 
 	return err
 }

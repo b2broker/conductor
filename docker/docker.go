@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 
@@ -45,24 +46,46 @@ func (d *DClient) Pull(imgRef string, authStr string) error {
 	return nil
 }
 
-func (d *DClient) Start(img string, env []string) (error, string) {
+//TODO wait till ready
+func (d *DClient) Start(img string, env []string, network string) (error, string) {
 
 	resp, err := d.cli.ContainerCreate(d.ctx, &container.Config{
 		Image: img,
 		Env:   env,
 		Tty:   false,
-	}, &container.HostConfig{RestartPolicy: container.RestartPolicy{
-		Name:              "always",
-		MaximumRetryCount: 0,
-	}}, nil, nil, "")
+	}, nil, nil, nil, "")
 	if err != nil {
 		return err, ""
 	}
 
-	if err := d.cli.ContainerStart(d.ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
-		panic(err)
+	if network != "" {
+		err = d.NetworkConnect(network, resp.ID)
+		if err != nil {
+			return err, ""
+		}
 	}
 
+	//, &container.HostConfig{RestartPolicy: container.RestartPolicy{
+	//	Name:              "always",
+	//	MaximumRetryCount: 0,
+	//}
+
+	if err := d.cli.ContainerStart(d.ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
+		return err, ""
+	}
+
+	//statusCh, errCh := d.cli.ContainerWait(d.ctx, resp.ID, container.WaitConditionNotRunning)
+	//select {
+	//case err := <-errCh:
+	//	if err != nil {
+	//		return err, ""
+	//	}
+	//case <-statusCh:
+	//	fmt.Println("!!!Status", statusCh)
+	//	break
+	//}
+
+	fmt.Println("Here")
 	return nil, resp.ID
 }
 
