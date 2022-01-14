@@ -2,7 +2,6 @@ package rabbitmq
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/streadway/amqp"
 )
@@ -58,17 +57,61 @@ func (r *Rabbit) Stop() {
 	r.channel.Close()
 }
 
-func (r *Rabbit) Read(onMsg func(amqp.Delivery) error) {
+func (r *Rabbit) Read(onMsg func(amqp.Delivery)) {
 	for {
 		for message := range r.consume {
 			//message.Ack(false)
 			fmt.Println("Get rabbit message")
-			if err := onMsg(message); err != nil {
-				log.Printf(" > Received message: %s\n", message.Body)
-			}
+			onMsg(message)
 		}
 	}
 
+}
+
+func (r *Rabbit) ExchangeRead(exchangeName string, onMsg func(amqp.Delivery)) error {
+
+	err := r.channel.ExchangeDeclare(
+		exchangeName, // name
+		"fanout",     // type
+		true,         // durable
+		false,        // auto-deleted
+		false,        // internal
+		false,        // no-wait
+		nil,          // arguments
+	)
+	if err != nil {
+		return err
+	}
+
+	err = r.channel.QueueBind(
+		r.Queue.Name, // queue name
+		"",           // routing key
+		exchangeName, // exchange
+		false,
+		nil,
+	)
+
+	if err != nil {
+		return err
+	}
+
+	msgs, err := r.channel.Consume(
+		r.Queue.Name, // queue
+		"",           // consumer
+		true,         // auto-ack
+		false,        // exclusive
+		false,        // no-local
+		false,        // no-wait
+		nil,          // args
+	)
+
+	for message := range msgs {
+		//message.Ack(false)
+		fmt.Println("Get rabbit message  from exchange")
+		onMsg(message)
+	}
+
+	return nil
 }
 
 func (r *Rabbit) ReplyTo(msg amqp.Publishing, replyTo string) error {

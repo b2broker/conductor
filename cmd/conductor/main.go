@@ -32,6 +32,10 @@ func main() {
 	dockerPass := os.Getenv("DOCKER_PASS")
 	dockerNetwork := os.Getenv("DOCKER_NETWORK")
 	anvilLifeTime, err := strconv.Atoi(os.Getenv("ANVIL_LIFE_TIME_MINS"))
+
+	dockerLogin = ""
+	dockerPass = ""
+	imgRef = "dolt.v3:latest"
 	if err != nil {
 		panic(err)
 	}

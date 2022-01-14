@@ -35,6 +35,7 @@ func NewDClient(context *context.Context) *DClient {
 
 func (d *DClient) Pull(imgRef string, authStr string) error {
 
+	//reader, err := d.cli.ImagePull(d.ctx, imgRef, types.ImagePullOptions{RegistryAuth: authStr})
 	reader, err := d.cli.ImagePull(d.ctx, imgRef, types.ImagePullOptions{RegistryAuth: authStr})
 	if err != nil {
 		return err
@@ -81,7 +82,7 @@ func (d *DClient) Start(img string, env []string, network string) (error, string
 	//		return err, ""
 	//	}
 	//case <-statusCh:
-	//	fmt.Println("!!!Status", statusCh)
+	//	fmt.Println("!!!status", statusCh)
 	//	break
 	//}
 

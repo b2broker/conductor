@@ -4,24 +4,27 @@ package conductor;
 option go_package = "/conductor";
 
 service ConductorService {
-  rpc Create (Request) returns (CreateResponse);
-  rpc Stop (Request) returns (StopResponse);
+  rpc Attach (Request) returns (AttachResponse);
+  rpc Detach (Request) returns (DetachResponse);
 }
 
 message Request {
+  // MT version
+  // dll version
   string server = 1;
   int64 login = 2;
   string password = 3;
 }
 
-message CreateResponse {
+message AttachResponse {
   string rpc_queue = 1;
   string publish_queue = 2;
   string error = 3;
 }
 
-message StopResponse {
+message DetachResponse {
   string error = 1;
 }
-//
+
+//export PATH=$PATH:$(go env GOPATH)/bin
 //    protoc -I=/Users/nadezhdachurikova/Projects/conductor/proto/conductor --go_out=/Users/nadezhdachurikova/Projects/conductor/proto/src_out /Users/nadezhdachurikova/Projects/conductor/proto/conductor/conduct.proto

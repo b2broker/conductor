@@ -1,19 +1,21 @@
 package docker
 
 import (
+	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-
-	"go.uber.org/zap"
-
-	"github.com/streadway/amqp"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/b2broker/conductor/proto/src_out/conductor"
 	"github.com/b2broker/conductor/rabbitmq"
 	"github.com/docker/docker/api/types/events"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
+	"github.com/streadway/amqp"
+	"go.uber.org/zap"
 )
 
 type Settings struct {
@@ -29,21 +31,41 @@ type Queues struct {
 	publishExchange string
 }
 
+type AnvilStatus string
+
+const (
+	Starting AnvilStatus = "starting"
+	Healthy  AnvilStatus = "healthy"
+	Dead     AnvilStatus = "dead"
+)
+
 type Anvil struct {
 	credsHash string
 	queues    Queues
+	status    AnvilStatus
 }
 
 type Controller struct {
 	docker   *DClient
-	anvils   map[string]Anvil
+	anvils   map[string]*Anvil
 	rabbit   *rabbitmq.Rabbit
 	settings Settings
-	slog     *zap.SugaredLogger
+	log      *zap.SugaredLogger
+
+	eventState   map[string]chan events.Message
+	eventStateMu sync.RWMutex
+	anvilMutex   sync.RWMutex
 }
 
 func NewController(d *DClient, r *rabbitmq.Rabbit, settings Settings, logger *zap.SugaredLogger) *Controller {
-	return &Controller{docker: d, rabbit: r, settings: settings, anvils: make(map[string]Anvil), slog: logger}
+	return &Controller{
+		docker:     d,
+		rabbit:     r,
+		settings:   settings,
+		anvils:     make(map[string]*Anvil),
+		log:        logger,
+		eventState: make(map[string]chan events.Message),
+	}
 }
 
 func parseCreateRequest(amqpMsg amqp.Delivery) (*conductor.Request, error) {
@@ -75,7 +97,10 @@ func anvilHash(request *conductor.Request) string {
 	return hash
 }
 
-func (c *Controller) findAnvil(hash string) (string, Anvil, error) {
+func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
+
+	c.anvilMutex.RLock()
+	defer c.anvilMutex.RUnlock()
 
 	for dockerId, anvil := range c.anvils {
 		if anvil.credsHash == hash {
@@ -83,40 +108,50 @@ func (c *Controller) findAnvil(hash string) (string, Anvil, error) {
 		}
 	}
 
-	return "", Anvil{}, fmt.Errorf("can't find Anvil")
+	return "", &Anvil{}, fmt.Errorf("can't find Anvil")
 
 }
 
-func (c *Controller) processCreate(request *conductor.Request, corId string, replyTo string) error {
+func (c *Controller) findOrCreate(request *conductor.Request) (error, Queues) {
 
 	hash := anvilHash(request)
+
+	err := c.StartAndWait(request, hash)
+	if err != nil {
+		fmt.Println("Can't create new Anvil")
+		return err, Queues{}
+	}
+
 	_, anvil, err := c.findAnvil(hash)
+
 	if err != nil {
-		c.slog.Debug("Create new Anvil")
-		return c.createAndReply(request, hash, corId, replyTo)
+		return err, Queues{}
 	}
 
-	c.slog.Debug("Anvil exist, only reply")
-
-	response, err := prepareCreateResponse(anvil.queues, "")
-	if err != nil {
-		return err
+	if anvil.status != Healthy {
+		fmt.Println("container unhealthy")
+		return fmt.Errorf("container unhealthy"), Queues{}
 	}
-	return c.reply(response, corId, replyTo)
+
+	return nil, anvil.queues
 }
 
-func (c *Controller) processStop(request *conductor.Request, corId string, replyTo string) error {
+func (c *Controller) processStop(request *conductor.Request, corId string, replyTo string) {
 	hash := anvilHash(request)
 	id, anvil, err := c.findAnvil(hash)
 	if err != nil {
-		c.slog.Debug("Try to stop Anvil. Such Anvil doesn't not exist")
+		c.log.Debug("Try to stop Anvil. Such Anvil doesn't not exist")
 		response, err := prepareStopResponse(err.Error())
 		if err != nil {
-			return err
+			c.log.Error("Can't parse stop request")
+			return
 		}
-		return c.reply(response, corId, replyTo)
+		err = c.reply(response, corId, replyTo)
+		if err != nil {
+			c.log.Error("Can't send stop answer")
+		}
 	}
-	c.slog.Debug("Need to Stop Anvil", anvil.credsHash)
+	c.log.Debug("Need to Stop Anvil", anvil.credsHash)
 
 	errSrt := ""
 
@@ -125,50 +160,77 @@ func (c *Controller) processStop(request *conductor.Request, corId string, reply
 		errSrt = err.Error()
 	} else {
 		//delete only if stop
+		c.anvilMutex.Lock()
 		delete(c.anvils, id)
+		c.anvilMutex.Unlock()
 	}
 
 	response, err := prepareStopResponse(errSrt)
 	if err != nil {
-		return err
+		c.log.Error("Can't prepare stop answer")
 	}
 
-	return c.reply(response, corId, replyTo)
+	err = c.reply(response, corId, replyTo)
+	if err != nil {
+		c.log.Error("Can't send stop answer")
+	}
 
 }
 
-func (c *Controller) Handler(amqpMsg amqp.Delivery) error {
+func (c *Controller) processCreate(amqpMsg amqp.Delivery) {
 
-	c.slog.Debugw("Get request",
+	request, err := parseCreateRequest(amqpMsg)
+	if err != nil {
+		c.log.Error("Can't parse msg")
+		return
+	}
+
+	err, queues := c.findOrCreate(request)
+	createErr := ""
+	if err != nil {
+		createErr = err.Error()
+	}
+
+	response, err := prepareCreateResponse(queues, createErr)
+	if err != nil {
+		c.log.Error("Can't prepare answer")
+		return
+	}
+
+	err = c.reply(response, amqpMsg.CorrelationId, amqpMsg.ReplyTo)
+	if err != nil {
+		c.log.Error("Can't send answer")
+		return
+	}
+	fmt.Println("Create Anvil Send Answer")
+}
+
+func (c *Controller) Handler(amqpMsg amqp.Delivery) {
+
+	c.log.Debugw("Get request",
 		"CorId", amqpMsg.CorrelationId,
 		"ReplyTo", amqpMsg.ReplyTo)
 
 	if v, k := amqpMsg.Headers["endpoint"]; k {
-		c.slog.Debug("Endpoint", v)
-		if v == "Create" {
-			request, err := parseCreateRequest(amqpMsg)
-			if err == nil {
-				return c.processCreate(request, amqpMsg.CorrelationId, amqpMsg.ReplyTo)
-			}
-		} else if v == "Stop" {
+		c.log.Debug("Endpoint", v)
+		if v == "ConductorService.Attach" {
+			go c.processCreate(amqpMsg)
+
+		} else if v == "ConductorService.Detach" {
 			request, err := parseStopRequest(amqpMsg)
 			if err == nil {
-				return c.processStop(request, amqpMsg.CorrelationId, amqpMsg.ReplyTo)
+				c.processStop(request, amqpMsg.CorrelationId, amqpMsg.ReplyTo)
 			}
-		} else {
-			return fmt.Errorf("unknown command")
 		}
 	}
-
-	return fmt.Errorf("no endpoint")
 }
 
-func (c *Controller) createAnvil(request *conductor.Request) (string, Queues, error) {
-	err := c.docker.Pull(c.settings.ImgRef, c.settings.AuthToken)
-	if err != nil {
-		c.slog.Errorw("Can't pull image", "error", err.Error())
-		return "", Queues{}, err
-	}
+func (c *Controller) startAnvil(request *conductor.Request) (string, Queues, error) {
+	//err := c.docker.Pull(c.settings.ImgRef, c.settings.AuthToken)
+	//if err != nil {
+	//	c.log.Errorw("Can't pull image", "error", err.Error())
+	//	return "", Queues{}, err
+	//}
 
 	rpcQueue := uuid.New().String()
 	publishExchange := uuid.New().String()
@@ -183,7 +245,7 @@ func (c *Controller) createAnvil(request *conductor.Request) (string, Queues, er
 
 	err, resID := c.docker.Start(c.settings.ImgRef, env, c.settings.NetworkName)
 	if err != nil {
-		c.slog.Errorw("Can't start container", "error", err.Error())
+		c.log.Errorw("Can't start container", "error", err.Error())
 		return "", Queues{}, err
 	}
 
@@ -196,7 +258,7 @@ func (c *Controller) createAnvil(request *conductor.Request) (string, Queues, er
 }
 
 func prepareStopResponse(errorStr string) ([]byte, error) {
-	stopResponse := conductor.StopResponse{Error: errorStr}
+	stopResponse := conductor.DetachResponse{Error: errorStr}
 
 	bytes, err := proto.Marshal(&stopResponse)
 	if err != nil {
@@ -206,7 +268,7 @@ func prepareStopResponse(errorStr string) ([]byte, error) {
 }
 
 func prepareCreateResponse(anvilQueues Queues, errorStr string) ([]byte, error) {
-	createResponse := conductor.CreateResponse{
+	createResponse := conductor.AttachResponse{
 		RpcQueue:     anvilQueues.rpcQueue,
 		PublishQueue: anvilQueues.publishExchange,
 		Error:        errorStr,
@@ -238,35 +300,118 @@ func (c *Controller) reply(answer []byte, corId string, replyTo string) error {
 	return nil
 }
 
-func (c *Controller) createAndReply(request *conductor.Request, hash string, corId string, replyTo string) error {
-	anvilID, anvilQueues, err := c.createAnvil(request)
+func (c *Controller) createNewAnvil(request *conductor.Request, hash string) (chan events.Message, error) {
+	c.eventStateMu.Lock()
+	defer c.eventStateMu.Unlock()
 
-	errSrt := ""
+	anvilID, anvilQueues, err := c.startAnvil(request)
+	// TODO: check already existed
+	eventsChan := make(chan events.Message, 1)
+
+	c.eventState[anvilID] = eventsChan
+
 	if err == nil {
-		fmt.Println("err == nil")
-		c.anvils[anvilID] = Anvil{
+		c.anvilMutex.Lock()
+		c.anvils[anvilID] = &Anvil{
 			credsHash: hash,
 			queues: Queues{
 				rpcQueue:        anvilQueues.rpcQueue,
 				publishExchange: anvilQueues.publishExchange,
 			},
+			status: Starting,
 		}
+		c.anvilMutex.Unlock()
 
-	} else {
-		errSrt = err.Error()
 	}
 
-	response, err := prepareCreateResponse(anvilQueues, errSrt)
+	return eventsChan, err
+}
+
+func (c *Controller) StartAndWait(request *conductor.Request, hash string) error {
+
+	_, _, err := c.findAnvil(hash)
+	if err == nil {
+		return nil
+	}
+
+	ch, err := c.createNewAnvil(request, hash)
 	if err != nil {
 		return err
 	}
 
-	return c.reply(response, corId, replyTo)
+	// TODO: handle cancel
+	ctx, _ := context.WithTimeout(context.Background(), time.Second*60)
+	return c.WaitTillStart(ctx, ch)
+}
 
+func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Message) error {
+	for {
+		select {
+		case msg, ok := <-events:
+			if !ok {
+				return fmt.Errorf("chan is closed")
+			}
+
+			fmt.Println("Receive msg from:", msg.ID)
+
+			//fmt.Println("ID:", msg.ID)
+			//fmt.Println("Type:", msg.Type)
+			//fmt.Println("Actor:", msg.Actor)
+			//fmt.Println("Action:", msg.Action)
+			//fmt.Println("From:", msg.From)
+			//fmt.Println("Scope:", msg.Scope)
+			//fmt.Println("status:", msg.Status)
+			//fmt.Println("Time:", msg.Time)
+
+			if strings.Contains(msg.Status, "health_status:") {
+				c.anvilMutex.Lock()
+
+				if anv, ok := c.anvils[msg.ID]; ok {
+					if strings.Contains(msg.Status, "healthy") {
+						anv.status = Healthy
+						fmt.Println("Now container is healthy and can reply")
+					} else if strings.Contains(msg.Status, "unhealthy") {
+						anv.status = Dead
+						fmt.Println("Now container is unhealthy and can reply")
+					}
+
+					c.anvilMutex.Unlock()
+
+					c.eventStateMu.Lock()
+					if ch, ok := c.eventState[msg.ID]; ok {
+						close(ch)
+						delete(c.eventState, msg.ID)
+					}
+					c.eventStateMu.Unlock()
+				}
+
+			}
+		case <-ctx.Done():
+			return fmt.Errorf("timeout has been reached")
+		}
+	}
 }
 
 func (c *Controller) EventHandler(msg events.Message) {
-	fmt.Println(msg)
+	fmt.Printf("GOT NEW EVENT: %+v\n", msg)
+
+	c.eventStateMu.Lock()
+	defer c.eventStateMu.Unlock()
+
+	if msg.ID == "" {
+		return
+	}
+
+	fmt.Println("Sending event to:", msg.ID)
+
+	ch, ok := c.eventState[msg.ID]
+	if !ok {
+		fmt.Println(" SHOULD NOT HAPPENED AT ALL")
+	}
+
+	fmt.Println("Send events to channel", msg.ID)
+	ch <- msg
+
 }
 
 func (c *Controller) ErrorHandler(err error) {
