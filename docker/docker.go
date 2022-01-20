@@ -128,6 +128,40 @@ func (d *DClient) Events(onEvent func(message events.Message), onError func(err 
 
 }
 
+func (d *DClient) HealthStatus(id string) (string, error) {
+
+	res, err := d.cli.ContainerInspect(d.ctx, id)
+	if err != nil {
+		fmt.Println("Can't read info about ", id)
+		return "", err
+	}
+
+	return res.State.Health.Status, nil
+}
+
+func (d *DClient) ReadEnv() map[string]container.Config {
+	containers, err := d.cli.ContainerList(d.ctx, types.ContainerListOptions{})
+	if err != nil {
+		panic(err)
+	}
+
+	containersList := make(map[string]container.Config)
+
+	for _, c := range containers {
+
+		res, err := d.cli.ContainerInspect(d.ctx, c.ID)
+		if err != nil {
+			fmt.Println("Can't read info about ", c.ID)
+			continue
+		}
+
+		containersList[c.ID] = *res.Config
+	}
+
+	return containersList
+
+}
+
 func AuthSrt(user string, pass string) string {
 	authConfig := types.AuthConfig{
 		Username: user,

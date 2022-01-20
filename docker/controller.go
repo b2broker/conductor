@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -90,9 +91,9 @@ func parseStopRequest(amqpMsg amqp.Delivery) (*conductor.Request, error) {
 	return protoMsg, nil
 }
 
-func anvilHash(request *conductor.Request) string {
+func anvilHash(server string, login int64, password string) string {
 	h := sha1.New()
-	h.Write([]byte(fmt.Sprintf("%s%d%s", request.Server, request.Login, request.Password)))
+	h.Write([]byte(fmt.Sprintf("%s%d%s", server, login, password)))
 	hash := hex.EncodeToString(h.Sum(nil))
 	return hash
 }
@@ -104,6 +105,7 @@ func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
 
 	for dockerId, anvil := range c.anvils {
 		if anvil.credsHash == hash {
+			fmt.Println("!!!Find anvil")
 			return dockerId, anvil, nil
 		}
 	}
@@ -114,7 +116,9 @@ func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
 
 func (c *Controller) findOrCreate(request *conductor.Request) (error, Queues) {
 
-	hash := anvilHash(request)
+	hash := anvilHash(request.Server, request.Login, request.Password)
+	fmt.Println("New server: ", request.Server, "login: ", request.Login, "pass: ", request.Password)
+	fmt.Println("Create new with hash:", hash)
 
 	err := c.StartAndWait(request, hash)
 	if err != nil {
@@ -125,6 +129,7 @@ func (c *Controller) findOrCreate(request *conductor.Request) (error, Queues) {
 	_, anvil, err := c.findAnvil(hash)
 
 	if err != nil {
+		fmt.Println("!!!!!")
 		return err, Queues{}
 	}
 
@@ -137,7 +142,7 @@ func (c *Controller) findOrCreate(request *conductor.Request) (error, Queues) {
 }
 
 func (c *Controller) processStop(request *conductor.Request, corId string, replyTo string) {
-	hash := anvilHash(request)
+	hash := anvilHash(request.Server, request.Login, request.Password)
 	id, anvil, err := c.findAnvil(hash)
 	if err != nil {
 		c.log.Debug("Try to stop Anvil. Such Anvil doesn't not exist")
@@ -232,6 +237,7 @@ func (c *Controller) startAnvil(request *conductor.Request) (string, Queues, err
 	//	return "", Queues{}, err
 	//}
 
+	fmt.Println("startAnvil")
 	rpcQueue := uuid.New().String()
 	publishExchange := uuid.New().String()
 
@@ -304,6 +310,7 @@ func (c *Controller) createNewAnvil(request *conductor.Request, hash string) (ch
 	c.eventStateMu.Lock()
 	defer c.eventStateMu.Unlock()
 
+	fmt.Println("before startAnvil")
 	anvilID, anvilQueues, err := c.startAnvil(request)
 	// TODO: check already existed
 	eventsChan := make(chan events.Message, 1)
@@ -340,7 +347,7 @@ func (c *Controller) StartAndWait(request *conductor.Request, hash string) error
 	}
 
 	// TODO: handle cancel
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*60)
+	ctx, _ := context.WithTimeout(context.Background(), time.Second*120)
 	return c.WaitTillStart(ctx, ch)
 }
 
@@ -352,7 +359,7 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 				return fmt.Errorf("chan is closed")
 			}
 
-			fmt.Println("Receive msg from:", msg.ID)
+			//fmt.Println("Receive msg from:", msg.ID)
 
 			//fmt.Println("ID:", msg.ID)
 			//fmt.Println("Type:", msg.Type)
@@ -382,7 +389,9 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 						close(ch)
 						delete(c.eventState, msg.ID)
 					}
+
 					c.eventStateMu.Unlock()
+					return nil
 				}
 
 			}
@@ -393,27 +402,101 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 }
 
 func (c *Controller) EventHandler(msg events.Message) {
-	fmt.Printf("GOT NEW EVENT: %+v\n", msg)
+	//fmt.Printf("GOT NEW EVENT: %+v\n", msg)
 
 	c.eventStateMu.Lock()
 	defer c.eventStateMu.Unlock()
-
 	if msg.ID == "" {
 		return
 	}
 
-	fmt.Println("Sending event to:", msg.ID)
+	//fmt.Println("Sending event to:", msg.ID)
 
 	ch, ok := c.eventState[msg.ID]
 	if !ok {
-		fmt.Println(" SHOULD NOT HAPPENED AT ALL")
+		return
 	}
 
-	fmt.Println("Send events to channel", msg.ID)
+	//fmt.Println("Send events to channel", msg.ID)
 	ch <- msg
 
 }
 
 func (c *Controller) ErrorHandler(err error) {
 	fmt.Println(err)
+}
+
+func (c *Controller) RestoreStatus() {
+	containersConfig := c.docker.ReadEnv()
+
+	for k, v := range containersConfig {
+
+		if strings.Contains(v.Image, "dolt") {
+
+			envs := make(map[string]string)
+
+			for _, item := range v.Env {
+				parts := strings.Split(item, "=")
+				if len(parts) != 2 {
+					continue
+				}
+				key := parts[0]
+				value := parts[1]
+
+				envs[key] = value
+			}
+
+			address := ""
+			login := int64(0)
+			password := ""
+
+			publicExchange := ""
+			rpcQueue := ""
+
+			//TODO ok != nill
+			if v, ok := envs["AMQP_PUBLISH_EXCHANGE"]; ok {
+				publicExchange = v
+			}
+			if v, ok := envs["AMQP_RPC_QUEUE"]; ok {
+				rpcQueue = v
+			}
+			if v, ok := envs["MT_ADDRESS"]; ok {
+				address = v
+			}
+			if v, ok := envs["MT_LOGIN"]; ok {
+				login, _ = strconv.ParseInt(v, 10, 64)
+			}
+			if v, ok := envs["MT_PASSWORD"]; ok {
+				password = v
+			}
+
+			anvilHash := anvilHash(address, login, password)
+
+			hl, err := c.docker.HealthStatus(k)
+			if err != nil {
+				c.log.Error("Can't get health status of container: ", k)
+				continue
+			}
+			status := Dead
+			if hl == "healthy" {
+				status = Healthy
+			}
+
+			anvil := Anvil{
+				credsHash: anvilHash,
+				queues: Queues{
+					rpcQueue:        rpcQueue,
+					publishExchange: publicExchange,
+				},
+				status: status,
+			}
+			c.anvilMutex.Lock()
+			c.anvils[k] = &anvil
+			c.anvilMutex.Unlock()
+			fmt.Println("Add anvil with hash:", anvilHash)
+
+		}
+
+	}
+
 }

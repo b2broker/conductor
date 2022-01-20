@@ -64,6 +64,7 @@ func main() {
 	dClient := docker.NewDClient(&dCtx)
 
 	controller := docker.NewController(dClient, rabbit, settings, slog)
+	controller.RestoreStatus()
 
 	go rabbit.Read(controller.Handler)
 
