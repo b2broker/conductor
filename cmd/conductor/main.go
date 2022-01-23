@@ -32,20 +32,22 @@ func main() {
 	dockerPass := os.Getenv("DOCKER_PASS")
 	dockerNetwork := os.Getenv("DOCKER_NETWORK")
 	anvilLifeTime, err := strconv.Atoi(os.Getenv("ANVIL_LIFE_TIME_MINS"))
+	amqpExternal := os.Getenv("AMQP_EXTERNAL_NAME")
 
-	dockerLogin = ""
-	dockerPass = ""
-	imgRef = "dolt.v3:latest"
+	//dockerLogin = ""
+	//dockerPass = ""
+	//imgRef = "dolt.v3:latest"
 	if err != nil {
 		panic(err)
 	}
 
 	settings := docker.Settings{
-		AmqpHost:    amqpHost,
-		AuthToken:   docker.AuthSrt(dockerLogin, dockerPass),
-		ImgRef:      imgRef,
-		NetworkName: dockerNetwork,
-		LifeTime:    int32(anvilLifeTime),
+		AmqpHost:         amqpHost,
+		AuthToken:        docker.AuthSrt(dockerLogin, dockerPass),
+		ImgRef:           imgRef,
+		NetworkName:      dockerNetwork,
+		LifeTime:         int32(anvilLifeTime),
+		AmqpExternalName: amqpExternal,
 	}
 
 	//TODO закрытие соединения

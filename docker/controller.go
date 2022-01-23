@@ -20,11 +20,12 @@ import (
 )
 
 type Settings struct {
-	AmqpHost    string
-	AuthToken   string
-	ImgRef      string
-	NetworkName string
-	LifeTime    int32
+	AmqpHost         string
+	AuthToken        string
+	ImgRef           string
+	NetworkName      string
+	LifeTime         int32
+	AmqpExternalName string
 }
 
 type Queues struct {
@@ -129,7 +130,6 @@ func (c *Controller) findOrCreate(request *conductor.Request) (error, Queues) {
 	_, anvil, err := c.findAnvil(hash)
 
 	if err != nil {
-		fmt.Println("!!!!!")
 		return err, Queues{}
 	}
 
@@ -245,7 +245,7 @@ func (c *Controller) startAnvil(request *conductor.Request) (string, Queues, err
 		fmt.Sprintf("MT_LOGIN=%d", request.Login),
 		fmt.Sprintf("MT_PASSWORD=%s", request.Password),
 		//fmt.Sprintf("AMQP_HOST=%s", strings.Replace(c.settings.AmqpHost, "amqp://", "", -1)),
-		fmt.Sprintf("AMQP_HOST=%s", "rabbitmq"), //TODO
+		fmt.Sprintf("AMQP_HOST=%s", c.settings.AmqpExternalName),
 		fmt.Sprintf("AMQP_RPC_QUEUE=%s", rpcQueue),
 		fmt.Sprintf("AMQP_PUBLISH_EXCHANGE=%s", publishExchange)}
 
@@ -431,7 +431,7 @@ func (c *Controller) RestoreStatus() {
 
 	for k, v := range containersConfig {
 
-		if strings.Contains(v.Image, "dolt") {
+		if strings.Contains(v.Image, "anvil") {
 
 			envs := make(map[string]string)
 

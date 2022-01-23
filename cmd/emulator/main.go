@@ -122,27 +122,27 @@ func main() {
 		password: "***",
 	}
 
-	//anvil2 := Anvil{
-	//	server:   "***",
-	//	login:    0,
-	//	password: "***",
-	//}
+	anvil2 := Anvil{
+		server:   "***",
+		login:    2,
+		password: "***",
+	}
 
-	//fmt.Println("Attach anvil1")
-	//attachRequest(rabbit, anvil1, "attach")
-	////
-	//time.Sleep(10 * time.Second)
-	////
-	//fmt.Println("Detach anvil1")
-	//detachRequest(rabbit, anvil1, "detach")
-	//time.Sleep(10 * time.Second)
+	fmt.Println("Attach anvil1")
+	attachRequest(rabbit, anvil1, "attach")
 	//
-	//fmt.Println("Attach anvil1")
-	//attachRequest(rabbit, anvil1, "attach")
-	//fmt.Println("Attach anvil2")
-	//attachRequest(rabbit, anvil2, "attach")
+	time.Sleep(70 * time.Second)
 	//
-	//time.Sleep(70 * time.Second)
+	fmt.Println("Detach anvil1")
+	detachRequest(rabbit, anvil1, "detach")
+	time.Sleep(10 * time.Second)
+
+	fmt.Println("Attach anvil1")
+	attachRequest(rabbit, anvil1, "attach")
+	fmt.Println("Attach anvil2")
+	attachRequest(rabbit, anvil2, "attach")
+
+	time.Sleep(70 * time.Second)
 
 	fmt.Println("Detach anvil1")
 	detachRequest(rabbit, anvil1, "detach")
