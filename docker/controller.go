@@ -24,8 +24,8 @@ type Settings struct {
 	AuthToken        string
 	ImgRef           string
 	NetworkName      string
-	LifeTime         int32
 	AmqpExternalName string
+	StartTimeout     int
 }
 
 type Queues struct {
@@ -45,6 +45,20 @@ type Anvil struct {
 	credsHash string
 	queues    Queues
 	status    AnvilStatus
+}
+
+type MetaTraderVersion int
+
+const (
+	MT4 MetaTraderVersion = 4
+	MT5 MetaTraderVersion = 5
+)
+
+type AnvilRequest struct {
+	version  MetaTraderVersion
+	server   string
+	login    uint64
+	password string
 }
 
 type Controller struct {
@@ -70,29 +84,50 @@ func NewController(d *DClient, r *rabbitmq.Rabbit, settings Settings, logger *za
 	}
 }
 
-func parseCreateRequest(amqpMsg amqp.Delivery) (*conductor.Request, error) {
-	protoMsg := &conductor.Request{}
+func parseRequest(amqpMsg amqp.Delivery) (AnvilRequest, error) {
+	protoMsg := &conductor.ResourceRequest{}
 
 	msg := amqpMsg.Body
 	err := proto.Unmarshal(msg, protoMsg)
 	if err != nil {
-		return nil, err
+		return AnvilRequest{}, err
 	}
-	return protoMsg, nil
+
+	anvilRequest := AnvilRequest{}
+
+	if protoMsg.ResourceType == conductor.ResourceRequest_METATRADER_4 {
+		anvilRequest.version = MT4
+	} else if protoMsg.ResourceType == conductor.ResourceRequest_METATRADER_5 {
+		anvilRequest.version = MT5
+	} else {
+		return AnvilRequest{}, fmt.Errorf("unknown recource")
+	}
+
+	if v, ok := protoMsg.Params["server"]; ok {
+		anvilRequest.server = v
+	} else {
+		return AnvilRequest{}, fmt.Errorf("request doesn't contain server")
+	}
+
+	if v, ok := protoMsg.Params["login"]; ok {
+		anvilRequest.login, err = strconv.ParseUint(v, 10, 64)
+		if err != nil {
+			return AnvilRequest{}, fmt.Errorf("request contains incorrect login")
+		}
+	} else {
+		return AnvilRequest{}, fmt.Errorf("request doesn't contain login")
+	}
+
+	if v, ok := protoMsg.Params["password"]; ok {
+		anvilRequest.password = v
+	} else {
+		return AnvilRequest{}, fmt.Errorf("request doesn't contain password")
+	}
+
+	return anvilRequest, nil
 }
 
-func parseStopRequest(amqpMsg amqp.Delivery) (*conductor.Request, error) {
-	protoMsg := &conductor.Request{}
-
-	msg := amqpMsg.Body
-	err := proto.Unmarshal(msg, protoMsg)
-	if err != nil {
-		return nil, err
-	}
-	return protoMsg, nil
-}
-
-func anvilHash(server string, login int64, password string) string {
+func anvilHash(server string, login uint64, password string) string {
 	h := sha1.New()
 	h.Write([]byte(fmt.Sprintf("%s%d%s", server, login, password)))
 	hash := hex.EncodeToString(h.Sum(nil))
@@ -106,7 +141,6 @@ func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
 
 	for dockerId, anvil := range c.anvils {
 		if anvil.credsHash == hash {
-			fmt.Println("!!!Find anvil")
 			return dockerId, anvil, nil
 		}
 	}
@@ -115,10 +149,10 @@ func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
 
 }
 
-func (c *Controller) findOrCreate(request *conductor.Request) (error, Queues) {
+func (c *Controller) findOrCreate(request AnvilRequest) (error, Queues) {
 
-	hash := anvilHash(request.Server, request.Login, request.Password)
-	fmt.Println("New server: ", request.Server, "login: ", request.Login, "pass: ", request.Password)
+	hash := anvilHash(request.server, request.login, request.password)
+	fmt.Println("New server: ", request.server, "login: ", request.login, "pass: ", request.password)
 	fmt.Println("Create new with hash:", hash)
 
 	err := c.StartAndWait(request, hash)
@@ -141,8 +175,8 @@ func (c *Controller) findOrCreate(request *conductor.Request) (error, Queues) {
 	return nil, anvil.queues
 }
 
-func (c *Controller) processStop(request *conductor.Request, corId string, replyTo string) {
-	hash := anvilHash(request.Server, request.Login, request.Password)
+func (c *Controller) processStop(request AnvilRequest, corId string, replyTo string) {
+	hash := anvilHash(request.server, request.login, request.password)
 	id, anvil, err := c.findAnvil(hash)
 	if err != nil {
 		c.log.Debug("Try to stop Anvil. Such Anvil doesn't not exist")
@@ -154,7 +188,9 @@ func (c *Controller) processStop(request *conductor.Request, corId string, reply
 		err = c.reply(response, corId, replyTo)
 		if err != nil {
 			c.log.Error("Can't send stop answer")
+			return
 		}
+		return
 	}
 	c.log.Debug("Need to Stop Anvil", anvil.credsHash)
 
@@ -184,7 +220,7 @@ func (c *Controller) processStop(request *conductor.Request, corId string, reply
 
 func (c *Controller) processCreate(amqpMsg amqp.Delivery) {
 
-	request, err := parseCreateRequest(amqpMsg)
+	request, err := parseRequest(amqpMsg)
 	if err != nil {
 		c.log.Error("Can't parse msg")
 		return
@@ -222,7 +258,7 @@ func (c *Controller) Handler(amqpMsg amqp.Delivery) {
 			go c.processCreate(amqpMsg)
 
 		} else if v == "ConductorService.Detach" {
-			request, err := parseStopRequest(amqpMsg)
+			request, err := parseRequest(amqpMsg)
 			if err == nil {
 				c.processStop(request, amqpMsg.CorrelationId, amqpMsg.ReplyTo)
 			}
@@ -230,21 +266,20 @@ func (c *Controller) Handler(amqpMsg amqp.Delivery) {
 	}
 }
 
-func (c *Controller) startAnvil(request *conductor.Request) (string, Queues, error) {
-	//err := c.docker.Pull(c.settings.ImgRef, c.settings.AuthToken)
-	//if err != nil {
-	//	c.log.Errorw("Can't pull image", "error", err.Error())
-	//	return "", Queues{}, err
-	//}
+func (c *Controller) startAnvil(request AnvilRequest) (string, Queues, error) {
+	err := c.docker.Pull(c.settings.ImgRef, c.settings.AuthToken)
+	if err != nil {
+		c.log.Errorw("Can't pull image", "error", err.Error())
+		return "", Queues{}, err
+	}
 
 	fmt.Println("startAnvil")
 	rpcQueue := uuid.New().String()
 	publishExchange := uuid.New().String()
 
-	env := []string{fmt.Sprintf("MT_ADDRESS=%s", request.Server),
-		fmt.Sprintf("MT_LOGIN=%d", request.Login),
-		fmt.Sprintf("MT_PASSWORD=%s", request.Password),
-		//fmt.Sprintf("AMQP_HOST=%s", strings.Replace(c.settings.AmqpHost, "amqp://", "", -1)),
+	env := []string{fmt.Sprintf("MT_ADDRESS=%s", request.server),
+		fmt.Sprintf("MT_LOGIN=%d", request.login),
+		fmt.Sprintf("MT_PASSWORD=%s", request.password),
 		fmt.Sprintf("AMQP_HOST=%s", c.settings.AmqpExternalName),
 		fmt.Sprintf("AMQP_RPC_QUEUE=%s", rpcQueue),
 		fmt.Sprintf("AMQP_PUBLISH_EXCHANGE=%s", publishExchange)}
@@ -260,6 +295,7 @@ func (c *Controller) startAnvil(request *conductor.Request) (string, Queues, err
 		publishExchange: publishExchange,
 	}
 
+	fmt.Println("Return from startAnvil")
 	return resID, queues, nil
 }
 
@@ -275,9 +311,9 @@ func prepareStopResponse(errorStr string) ([]byte, error) {
 
 func prepareCreateResponse(anvilQueues Queues, errorStr string) ([]byte, error) {
 	createResponse := conductor.AttachResponse{
-		RpcQueue:     anvilQueues.rpcQueue,
-		PublishQueue: anvilQueues.publishExchange,
-		Error:        errorStr,
+		RpcQueue: anvilQueues.rpcQueue,
+		Exchange: anvilQueues.publishExchange,
+		Error:    errorStr,
 	}
 
 	bytes, err := proto.Marshal(&createResponse)
@@ -306,7 +342,7 @@ func (c *Controller) reply(answer []byte, corId string, replyTo string) error {
 	return nil
 }
 
-func (c *Controller) createNewAnvil(request *conductor.Request, hash string) (chan events.Message, error) {
+func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan events.Message, error) {
 	c.eventStateMu.Lock()
 	defer c.eventStateMu.Unlock()
 
@@ -334,7 +370,8 @@ func (c *Controller) createNewAnvil(request *conductor.Request, hash string) (ch
 	return eventsChan, err
 }
 
-func (c *Controller) StartAndWait(request *conductor.Request, hash string) error {
+// StartAndWait TODO pulling images takes too long
+func (c *Controller) StartAndWait(request AnvilRequest, hash string) error {
 
 	_, _, err := c.findAnvil(hash)
 	if err == nil {
@@ -343,15 +380,18 @@ func (c *Controller) StartAndWait(request *conductor.Request, hash string) error
 
 	ch, err := c.createNewAnvil(request, hash)
 	if err != nil {
+		fmt.Println("Create error", err)
 		return err
 	}
 
-	// TODO: handle cancel
-	ctx, _ := context.WithTimeout(context.Background(), time.Second*120)
-	return c.WaitTillStart(ctx, ch)
+	fmt.Println("Waiting for healthstatus")
+	//ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
+	fmt.Println("StartTimeout", c.settings.StartTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.settings.StartTimeout)*time.Minute)
+	return c.WaitTillStart(ctx, ch, cancel)
 }
 
-func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Message) error {
+func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Message, cancel context.CancelFunc) error {
 	for {
 		select {
 		case msg, ok := <-events:
@@ -359,40 +399,22 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 				return fmt.Errorf("chan is closed")
 			}
 
-			//fmt.Println("Receive msg from:", msg.ID)
-
-			//fmt.Println("ID:", msg.ID)
-			//fmt.Println("Type:", msg.Type)
-			//fmt.Println("Actor:", msg.Actor)
-			//fmt.Println("Action:", msg.Action)
-			//fmt.Println("From:", msg.From)
-			//fmt.Println("Scope:", msg.Scope)
-			//fmt.Println("status:", msg.Status)
-			//fmt.Println("Time:", msg.Time)
-
 			if strings.Contains(msg.Status, "health_status:") {
-				c.anvilMutex.Lock()
 
-				if anv, ok := c.anvils[msg.ID]; ok {
-					if strings.Contains(msg.Status, "healthy") {
-						anv.status = Healthy
-						fmt.Println("Now container is healthy and can reply")
-					} else if strings.Contains(msg.Status, "unhealthy") {
-						anv.status = Dead
-						fmt.Println("Now container is unhealthy and can reply")
-					}
+				c.updateHealthStatus(msg)
 
-					c.anvilMutex.Unlock()
+				//if _, ok := c.anvils[msg.ID]; ok {
 
-					c.eventStateMu.Lock()
-					if ch, ok := c.eventState[msg.ID]; ok {
-						close(ch)
-						delete(c.eventState, msg.ID)
-					}
-
-					c.eventStateMu.Unlock()
-					return nil
+				c.eventStateMu.Lock()
+				if ch, ok := c.eventState[msg.ID]; ok {
+					close(ch)
+					delete(c.eventState, msg.ID)
 				}
+
+				c.eventStateMu.Unlock()
+				cancel()
+				return nil
+				//}
 
 			}
 		case <-ctx.Done():
@@ -401,8 +423,25 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 	}
 }
 
+func (c *Controller) updateHealthStatus(msg events.Message) {
+	c.anvilMutex.Lock()
+
+	if anv, ok := c.anvils[msg.ID]; ok {
+		if strings.Contains(msg.Status, "healthy") {
+			anv.status = Healthy
+			fmt.Println(msg)
+			fmt.Println("Now container is healthy")
+		} else if strings.Contains(msg.Status, "unhealthy") {
+			anv.status = Dead
+			fmt.Println("Now container is unhealthy")
+		}
+	}
+	c.anvilMutex.Unlock()
+
+	c.CleanUp()
+}
+
 func (c *Controller) EventHandler(msg events.Message) {
-	//fmt.Printf("GOT NEW EVENT: %+v\n", msg)
 
 	c.eventStateMu.Lock()
 	defer c.eventStateMu.Unlock()
@@ -410,20 +449,44 @@ func (c *Controller) EventHandler(msg events.Message) {
 		return
 	}
 
-	//fmt.Println("Sending event to:", msg.ID)
-
 	ch, ok := c.eventState[msg.ID]
-	if !ok {
+	if ok {
+		ch <- msg
 		return
 	}
 
-	//fmt.Println("Send events to channel", msg.ID)
-	ch <- msg
+	c.updateHealthStatus(msg)
+
+	//if strings.Contains(msg.Status, "health_status:") {
+	//
+	//}
 
 }
 
 func (c *Controller) ErrorHandler(err error) {
 	fmt.Println(err)
+}
+
+func (c *Controller) CleanUp() {
+
+	fmt.Println("CleanUp")
+	c.RestoreStatus()
+
+	for id, anv := range c.anvils {
+		fmt.Println(id, anv)
+		if anv.status == Dead {
+			err := c.docker.Stop(id)
+			if err != nil {
+				c.log.Debug("Error while killing container with ID: ", id)
+			}
+			c.anvilMutex.Lock()
+			delete(c.anvils, id)
+			c.anvilMutex.Unlock()
+
+			c.log.Debug("Container with ID: ", id, " was deleted from map")
+		}
+	}
+
 }
 
 func (c *Controller) RestoreStatus() {
@@ -447,7 +510,7 @@ func (c *Controller) RestoreStatus() {
 			}
 
 			address := ""
-			login := int64(0)
+			login := uint64(0)
 			password := ""
 
 			publicExchange := ""
@@ -464,7 +527,7 @@ func (c *Controller) RestoreStatus() {
 				address = v
 			}
 			if v, ok := envs["MT_LOGIN"]; ok {
-				login, _ = strconv.ParseInt(v, 10, 64)
+				login, _ = strconv.ParseUint(v, 10, 64)
 			}
 			if v, ok := envs["MT_PASSWORD"]; ok {
 				password = v
@@ -480,6 +543,9 @@ func (c *Controller) RestoreStatus() {
 			status := Dead
 			if hl == "healthy" {
 				status = Healthy
+			} else {
+				fmt.Println("Find unhealthy anvil. Ignore")
+				continue
 			}
 
 			anvil := Anvil{
@@ -494,7 +560,6 @@ func (c *Controller) RestoreStatus() {
 			c.anvils[k] = &anvil
 			c.anvilMutex.Unlock()
 			fmt.Println("Add anvil with hash:", anvilHash)
-
 		}
 
 	}

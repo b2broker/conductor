@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"sync"
@@ -12,9 +13,6 @@ import (
 	"go.uber.org/zap"
 )
 
-// key-value для хранения состояния
-// либо костыль убивать все контейнеры при старке
-
 func main() {
 
 	///запрос на убийство
@@ -23,7 +21,7 @@ func main() {
 
 	logger, _ := zap.NewProduction()
 	defer logger.Sync() // flushes buffer, if any
-	slog := logger.Sugar()
+	log := logger.Sugar()
 
 	amqpHost := os.Getenv("AMQP_HOST")
 	amqpQueue := os.Getenv("AMQP_QUEUE")
@@ -31,23 +29,22 @@ func main() {
 	dockerLogin := os.Getenv("DOCKER_LOGIN")
 	dockerPass := os.Getenv("DOCKER_PASS")
 	dockerNetwork := os.Getenv("DOCKER_NETWORK")
-	anvilLifeTime, err := strconv.Atoi(os.Getenv("ANVIL_LIFE_TIME_MINS"))
 	amqpExternal := os.Getenv("AMQP_EXTERNAL_NAME")
 
-	//dockerLogin = ""
-	//dockerPass = ""
-	//imgRef = "dolt.v3:latest"
+	startTimeout, err := strconv.Atoi(os.Getenv("START_TIMEOUT_MINS"))
 	if err != nil {
-		panic(err)
+		log.Warn("START_TIMEOUT_MINS is not set. 5 minutes by default")
+		startTimeout = 5
 	}
+	fmt.Println(startTimeout)
 
 	settings := docker.Settings{
 		AmqpHost:         amqpHost,
 		AuthToken:        docker.AuthSrt(dockerLogin, dockerPass),
 		ImgRef:           imgRef,
 		NetworkName:      dockerNetwork,
-		LifeTime:         int32(anvilLifeTime),
 		AmqpExternalName: amqpExternal,
+		StartTimeout:     startTimeout,
 	}
 
 	//TODO закрытие соединения
@@ -65,7 +62,7 @@ func main() {
 	dCtx := context.Background()
 	dClient := docker.NewDClient(&dCtx)
 
-	controller := docker.NewController(dClient, rabbit, settings, slog)
+	controller := docker.NewController(dClient, rabbit, settings, log)
 	controller.RestoreStatus()
 
 	go rabbit.Read(controller.Handler)

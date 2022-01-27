@@ -3,7 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"time"
+
+	"go.uber.org/zap"
 
 	"github.com/b2broker/conductor/proto/src_out/conductor"
 	"github.com/b2broker/conductor/rabbitmq"
@@ -13,7 +16,7 @@ import (
 
 type Anvil struct {
 	server   string
-	login    int64
+	login    uint64
 	password string
 }
 
@@ -40,15 +43,14 @@ func sender(r *rabbitmq.Rabbit, msg []byte, corId string, endpoint string) {
 
 func attachRequest(r *rabbitmq.Rabbit, anvil Anvil, corId string) {
 
-	//msg := conductor.Request{
-	//	Server:   "***",
-	//	Login:    0,
-	//	Password: "**",
-	//}
-	msg := conductor.Request{
-		Server:   anvil.server,
-		Login:    anvil.login,
-		Password: anvil.password,
+	paramMap := make(map[string]string)
+	paramMap["server"] = anvil.server
+	paramMap["login"] = strconv.FormatUint(anvil.login, 10)
+	paramMap["password"] = anvil.password
+
+	msg := conductor.ResourceRequest{
+		ResourceType: conductor.ResourceRequest_METATRADER_4,
+		Params:       paramMap,
 	}
 
 	s, err := proto.Marshal(&msg)
@@ -61,10 +63,14 @@ func attachRequest(r *rabbitmq.Rabbit, anvil Anvil, corId string) {
 
 func detachRequest(r *rabbitmq.Rabbit, anvil Anvil, corId string) {
 
-	msg := conductor.Request{
-		Server:   anvil.server,
-		Login:    anvil.login,
-		Password: anvil.password,
+	paramMap := make(map[string]string)
+	paramMap["server"] = anvil.server
+	paramMap["login"] = strconv.FormatUint(anvil.login, 10)
+	paramMap["password"] = anvil.password
+
+	msg := conductor.ResourceRequest{
+		ResourceType: conductor.ResourceRequest_METATRADER_4,
+		Params:       paramMap,
 	}
 
 	s, err := proto.Marshal(&msg)
@@ -78,22 +84,26 @@ func detachRequest(r *rabbitmq.Rabbit, anvil Anvil, corId string) {
 
 func handler(amqpMsg amqp.Delivery) {
 
+	logger, _ := zap.NewProduction()
+	defer logger.Sync() // flushes buffer, if any
+	log := logger.Sugar()
+
 	if amqpMsg.CorrelationId == "attach" {
 		protoMsg := &conductor.AttachResponse{}
 		msg := amqpMsg.Body
 		err := proto.Unmarshal(msg, protoMsg)
 		if err != nil {
-			fmt.Println(err)
+			log.Warn(err)
 		}
-		fmt.Println("Attach response: ", protoMsg)
+		log.Warn("Attach response: ", protoMsg)
 	} else if amqpMsg.CorrelationId == "detach" {
 		protoMsg := &conductor.DetachResponse{}
 		msg := amqpMsg.Body
 		err := proto.Unmarshal(msg, protoMsg)
 		if err != nil {
-			fmt.Println(err)
+			log.Warn(err)
 		}
-		fmt.Println("Detach response: ", protoMsg)
+		log.Warn("Detach response: ", protoMsg)
 	} else {
 		fmt.Println("unknown endpoint")
 	}
@@ -101,6 +111,11 @@ func handler(amqpMsg amqp.Delivery) {
 }
 
 func main() {
+
+	logger, _ := zap.NewProduction()
+	defer logger.Sync() // flushes buffer, if any
+	log := logger.Sugar()
+
 	amqpHost := os.Getenv("AMQP_HOST")
 	amqpQueue := os.Getenv("AMQP_QUEUE")
 
@@ -118,35 +133,37 @@ func main() {
 
 	anvil1 := Anvil{
 		server:   "***",
-		login:    0,
+		login:    63,
 		password: "***",
 	}
 
 	anvil2 := Anvil{
 		server:   "***",
-		login:    2,
+		login:    97,
 		password: "***",
 	}
 
-	fmt.Println("Attach anvil1")
+	log.Warn("Attach anvil1")
+
 	attachRequest(rabbit, anvil1, "attach")
 	//
-	time.Sleep(70 * time.Second)
+	time.Sleep(130 * time.Second)
 	//
-	fmt.Println("Detach anvil1")
+
+	log.Warn("Detach anvil1")
 	detachRequest(rabbit, anvil1, "detach")
-	time.Sleep(10 * time.Second)
+	time.Sleep(30 * time.Second)
 
 	fmt.Println("Attach anvil1")
 	attachRequest(rabbit, anvil1, "attach")
 	fmt.Println("Attach anvil2")
 	attachRequest(rabbit, anvil2, "attach")
 
-	time.Sleep(70 * time.Second)
+	time.Sleep(130 * time.Second)
 
 	fmt.Println("Detach anvil1")
 	detachRequest(rabbit, anvil1, "detach")
 	fmt.Println("Detach anvil1")
 	detachRequest(rabbit, anvil1, "detach")
-	time.Sleep(20 * time.Second)
+	time.Sleep(150 * time.Second)
 }

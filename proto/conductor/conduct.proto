@@ -3,28 +3,53 @@ syntax = "proto3";
 package conductor;
 option go_package = "/conductor";
 
-service ConductorService {
-  rpc Attach (Request) returns (AttachResponse);
-  rpc Detach (Request) returns (DetachResponse);
-}
-
-message Request {
-  // MT version
-  // dll version
-  string server = 1;
-  int64 login = 2;
-  string password = 3;
-}
-
-message AttachResponse {
-  string rpc_queue = 1;
-  string publish_queue = 2;
-  string error = 3;
-}
-
-message DetachResponse {
-  string error = 1;
-}
+//service ConductorService {
+//  rpc Attach (Request) returns (AttachResponse);
+//  rpc Detach (Request) returns (DetachResponse);
+//}
+//
+//message Request {
+//  // MT version
+//  // dll version
+//  string server = 1;
+//  int64 login = 2;
+//  string password = 3;
+//}
+//
+//message AttachResponse {
+//  string rpc_queue = 1;
+//  string publish_queue = 2;
+//  string error = 3;
+//}
+//
+//message DetachResponse {
+//  string error = 1;
+//}
 
 //export PATH=$PATH:$(go env GOPATH)/bin
 //    protoc -I=/Users/nadezhdachurikova/Projects/conductor/proto/conductor --go_out=/Users/nadezhdachurikova/Projects/conductor/proto/src_out /Users/nadezhdachurikova/Projects/conductor/proto/conductor/conduct.proto
+
+
+service ConductorService {
+  rpc Attach (ResourceRequest) returns (AttachResponse);
+  rpc Detach (ResourceRequest) returns (DetachResponse);
+}
+
+message ResourceRequest {
+  enum ResourceType {
+    METATRADER_4 = 0;
+    METATRADER_5 = 1;
+  }
+  ResourceType resource_type  = 1;
+  map<string, string> params = 5;
+}
+
+message AttachResponse {
+  string error       = 1;
+  string rpc_queue   = 5;
+  string exchange    = 10;
+}
+
+message DetachResponse {
+  string error       = 1;
+}

@@ -47,14 +47,18 @@ func (d *DClient) Pull(imgRef string, authStr string) error {
 	return nil
 }
 
-//TODO wait till ready
 func (d *DClient) Start(img string, env []string, network string) (error, string) {
 
 	resp, err := d.cli.ContainerCreate(d.ctx, &container.Config{
 		Image: img,
 		Env:   env,
 		Tty:   false,
-	}, nil, nil, nil, "")
+	}, &container.HostConfig{
+		RestartPolicy: container.RestartPolicy{
+			Name:              "on-failure",
+			MaximumRetryCount: 3,
+		},
+	}, nil, nil, "")
 	if err != nil {
 		return err, ""
 	}
@@ -66,27 +70,10 @@ func (d *DClient) Start(img string, env []string, network string) (error, string
 		}
 	}
 
-	//, &container.HostConfig{RestartPolicy: container.RestartPolicy{
-	//	Name:              "always",
-	//	MaximumRetryCount: 0,
-	//}
-
 	if err := d.cli.ContainerStart(d.ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
 		return err, ""
 	}
 
-	//statusCh, errCh := d.cli.ContainerWait(d.ctx, resp.ID, container.WaitConditionNotRunning)
-	//select {
-	//case err := <-errCh:
-	//	if err != nil {
-	//		return err, ""
-	//	}
-	//case <-statusCh:
-	//	fmt.Println("!!!status", statusCh)
-	//	break
-	//}
-
-	fmt.Println("Here")
 	return nil, resp.ID
 }
 
