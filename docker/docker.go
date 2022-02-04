@@ -15,27 +15,24 @@ import (
 	"github.com/docker/docker/client"
 )
 
-type DClient struct {
+type Client struct {
 	ctx context.Context
 	cli *client.Client
 }
 
-func NewDClient(context *context.Context) *DClient {
-
+func NewClient(ctx context.Context) *Client {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		panic(err)
 	}
 
-	return &DClient{
-		ctx: *context,
+	return &Client{
+		ctx: ctx,
 		cli: cli,
 	}
 }
 
-func (d *DClient) Pull(imgRef string, authStr string) error {
-
-	//reader, err := d.cli.ImagePull(d.ctx, imgRef, types.ImagePullOptions{RegistryAuth: authStr})
+func (d *Client) Pull(imgRef string, authStr string) error {
 	reader, err := d.cli.ImagePull(d.ctx, imgRef, types.ImagePullOptions{RegistryAuth: authStr})
 	if err != nil {
 		return err
@@ -47,8 +44,7 @@ func (d *DClient) Pull(imgRef string, authStr string) error {
 	return nil
 }
 
-func (d *DClient) Start(img string, env []string, network string) (error, string) {
-
+func (d *Client) Start(img string, env []string, network string) (string, error) {
 	resp, err := d.cli.ContainerCreate(d.ctx, &container.Config{
 		Image: img,
 		Env:   env,
@@ -60,25 +56,24 @@ func (d *DClient) Start(img string, env []string, network string) (error, string
 		},
 	}, nil, nil, "")
 	if err != nil {
-		return err, ""
+		return "", err
 	}
 
 	if network != "" {
 		err = d.NetworkConnect(network, resp.ID)
 		if err != nil {
-			return err, ""
+			return "", err
 		}
 	}
 
 	if err := d.cli.ContainerStart(d.ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
-		return err, ""
+		return "", err
 	}
 
-	return nil, resp.ID
+	return resp.ID, nil
 }
 
-func (d *DClient) NetworkConnect(networkName string, containerID string) error {
-
+func (d *Client) NetworkConnect(networkName string, containerID string) error {
 	settings := network.EndpointSettings{
 		Links:     []string{"rabbitmq"},
 		NetworkID: networkName,
@@ -91,17 +86,22 @@ func (d *DClient) NetworkConnect(networkName string, containerID string) error {
 	return nil
 }
 
-func (d *DClient) Stop(id string) error {
-
+func (d *Client) Stop(id string) error {
 	if err := d.cli.ContainerStop(d.ctx, id, nil); err != nil {
+		return err
+	}
+
+	if err := d.cli.ContainerRemove(d.ctx, id, types.ContainerRemoveOptions{
+		RemoveVolumes: true,
+		Force:         true,
+	}); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (d *DClient) Events(onEvent func(message events.Message), onError func(err error)) {
-
+func (d *Client) Events(onEvent func(message events.Message), onError func(err error)) {
 	c1, c2 := d.cli.Events(d.ctx, types.EventsOptions{})
 
 	for {
@@ -112,21 +112,19 @@ func (d *DClient) Events(onEvent func(message events.Message), onError func(err 
 			onError(err)
 		}
 	}
-
 }
 
-func (d *DClient) HealthStatus(id string) (string, error) {
+func (d *Client) HealthStatus(id string) (string, error) {
 
 	res, err := d.cli.ContainerInspect(d.ctx, id)
 	if err != nil {
-		fmt.Println("Can't read info about ", id)
 		return "", err
 	}
 
 	return res.State.Health.Status, nil
 }
 
-func (d *DClient) ReadEnv() map[string]container.Config {
+func (d *Client) ReadEnv() map[string]container.Config {
 	containers, err := d.cli.ContainerList(d.ctx, types.ContainerListOptions{})
 	if err != nil {
 		panic(err)
@@ -146,7 +144,6 @@ func (d *DClient) ReadEnv() map[string]container.Config {
 	}
 
 	return containersList
-
 }
 
 func AuthSrt(user string, pass string) string {

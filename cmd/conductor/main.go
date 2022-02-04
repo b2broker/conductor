@@ -1,25 +1,38 @@
 package main
 
 import (
-	"fmt"
+	"encoding/json"
 	"os"
 	"strconv"
-	"sync"
 
 	"github.com/b2broker/conductor/docker"
 	"github.com/b2broker/conductor/rabbitmq"
 	"github.com/docker/distribution/context"
-	"github.com/streadway/amqp"
 	"go.uber.org/zap"
 )
 
 func main() {
 
-	///запрос на убийство
-	//хранилище состояний SqLite
-	//при падении Anvil докер должен перезапускаться (провести эмуляцию )
+	rawJSON := []byte(`{
+   "level": "debug",
+   "encoding": "json",
+   "outputPaths": ["stdout"],
+   "errorOutputPaths": ["stderr"],
+   "encoderConfig": {
+     "messageKey": "message",
+     "levelKey": "level",
+     "levelEncoder": "lowercase"
+   }
+ }`)
+	var cfg zap.Config
+	if err := json.Unmarshal(rawJSON, &cfg); err != nil {
+		panic(err)
+	}
+	logger, err := cfg.Build()
+	if err != nil {
+		panic(err)
+	}
 
-	logger, _ := zap.NewProduction()
 	defer logger.Sync() // flushes buffer, if any
 	log := logger.Sugar()
 
@@ -36,7 +49,6 @@ func main() {
 		log.Warn("START_TIMEOUT_MINS is not set. 5 minutes by default")
 		startTimeout = 5
 	}
-	fmt.Println(startTimeout)
 
 	settings := docker.Settings{
 		AmqpHost:         amqpHost,
@@ -48,33 +60,38 @@ func main() {
 	}
 
 	//TODO закрытие соединения
-	connectRabbitMQ, err := amqp.Dial(amqpHost)
-	if err != nil {
-		panic(err)
-	}
+	//connectRabbitMQ, err := rabbitmq.Dial(amqpHost)
+	//if err != nil {
+	//	log.Panicf("could not connect to amqp: %v", err)
+	//}
 
-	rabbit, err := rabbitmq.NewRabbit(connectRabbitMQ, amqpQueue, false)
+	rabbit, err := rabbitmq.NewRabbit(amqpHost, amqpQueue, false)
 	if err != nil {
-		panic(err)
+		log.Panicf("could not connect to rabbit: %v", err)
 	}
 
 	//создавать коннект в main, и контролировать
-	dCtx := context.Background()
-	dClient := docker.NewDClient(&dCtx)
+	dClient := docker.NewClient(context.Background())
 
 	controller := docker.NewController(dClient, rabbit, settings, log)
+	err = controller.PullAnvil()
+	if err != nil {
+		log.Panicf("could not pull image: %v", err)
+	}
 	controller.RestoreStatus()
 
 	go rabbit.Read(controller.Handler)
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		dClient.Events(controller.EventHandler, controller.ErrorHandler)
-		wg.Done()
-	}()
+	dClient.Events(controller.EventHandler, controller.ErrorHandler)
 
-	wg.Wait()
+	//var wg sync.WaitGroup
+	//wg.Add(1)
+	//go func() {
+	//	dClient.Events(controller.EventHandler, controller.ErrorHandler)
+	//	wg.Done()
+	//}()
+	//
+	//wg.Wait()
 
 	//	отслеживать сигнал, graceful shutdown
 

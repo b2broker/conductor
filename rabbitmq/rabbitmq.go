@@ -2,18 +2,26 @@ package rabbitmq
 
 import (
 	"fmt"
+	"log"
 
+	"github.com/isayme/go-amqp-reconnect/rabbitmq"
 	"github.com/streadway/amqp"
 )
 
 type Rabbit struct {
-	connection *amqp.Connection
-	channel    *amqp.Channel
+	connection *rabbitmq.Connection
+	channel    *rabbitmq.Channel
 	consume    <-chan amqp.Delivery
 	Queue      amqp.Queue
 }
 
-func NewRabbit(con *amqp.Connection, queueName string, exclusive bool) (*Rabbit, error) {
+func NewRabbit(amqpHost string, queueName string, exclusive bool) (*Rabbit, error) {
+
+	rabbitmq.Debug = true
+	con, err := rabbitmq.Dial(amqpHost)
+	if err != nil {
+		log.Panic(err)
+	}
 
 	channelRabbitMQ, err := con.Channel()
 	if err != nil {
@@ -26,7 +34,7 @@ func NewRabbit(con *amqp.Connection, queueName string, exclusive bool) (*Rabbit,
 	}
 	q, err := channelRabbitMQ.QueueDeclare(
 		qName,     // name
-		false,     // durable
+		true,      // durable
 		false,     // delete when unused
 		exclusive, // exclusive
 		false,     // no-wait

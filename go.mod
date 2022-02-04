@@ -7,8 +7,9 @@ require (
 	github.com/docker/distribution v2.7.1+incompatible
 	github.com/docker/docker v20.10.11+incompatible
 	github.com/docker/go-connections v0.4.0 // indirect
-	github.com/golang/protobuf v1.5.0
+	github.com/golang/protobuf v1.5.0 // indirect
 	github.com/google/uuid v1.3.0
+	github.com/isayme/go-amqp-reconnect v0.0.0-20210303120416-fc811b0bcda2
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/streadway/amqp v1.0.0
 	go.uber.org/atomic v1.9.0 // indirect
