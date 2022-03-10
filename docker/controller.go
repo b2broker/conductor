@@ -300,7 +300,7 @@ func (c *Controller) EventHandler(msg events.Message) {
 		return
 	}
 
-	if strings.Contains(msg.Status, "health_status:") {
+	if strings.Contains(msg.Status, "health_status:") || strings.Contains(msg.Action, "stop") {
 		c.updateHealthStatus(msg)
 	}
 

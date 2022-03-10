@@ -14,7 +14,7 @@ func (c *Controller) updateHealthStatus(msg events.Message) {
 		if strings.Contains(msg.Status, "healthy") {
 			anv.status = Healthy
 			c.log.Debug("Now container is healthy")
-		} else if strings.Contains(msg.Status, "unhealthy") {
+		} else {
 			anv.status = Dead
 			c.log.Debug("Now container is unhealthy")
 		}
