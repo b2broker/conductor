@@ -3,36 +3,16 @@ syntax = "proto3";
 package conductor;
 option go_package = "/conductor";
 
-//service ConductorService {
-//  rpc Attach (Request) returns (AttachResponse);
-//  rpc Detach (Request) returns (DetachResponse);
-//}
-//
-//message Request {
-//  // MT version
-//  // dll version
-//  string server = 1;
-//  int64 login = 2;
-//  string password = 3;
-//}
-//
-//message AttachResponse {
-//  string rpc_queue = 1;
-//  string publish_queue = 2;
-//  string error = 3;
-//}
-//
-//message DetachResponse {
-//  string error = 1;
-//}
+import "google/protobuf/empty.proto";
 
 //export PATH=$PATH:$(go env GOPATH)/bin
-//    protoc -I=/Users/nadezhdachurikova/Projects/conductor/proto/conductor --go_out=/Users/nadezhdachurikova/Projects/conductor/proto/src_out /Users/nadezhdachurikova/Projects/conductor/proto/conductor/conduct.proto
+//protoc -I=/Users/nadezhdachurikova/Projects/conductor/proto/conductor --go_out=/Users/nadezhdachurikova/Projects/conductor/proto/src_out /Users/nadezhdachurikova/Projects/conductor/proto/conductor/conduct.proto
 
 
 service ConductorService {
   rpc Attach (ResourceRequest) returns (AttachResponse);
   rpc Detach (ResourceRequest) returns (DetachResponse);
+  rpc List (google.protobuf.Empty) returns (Resources);
 }
 
 message ResourceRequest {
@@ -45,11 +25,30 @@ message ResourceRequest {
 }
 
 message AttachResponse {
-  string error       = 1;
-  string rpc_queue   = 5;
-  string exchange    = 10;
+  string error    = 1;
+  Channel channel = 2;
 }
 
 message DetachResponse {
   string error       = 1;
+}
+
+message Channel {
+  bytes rpc_queue    = 1;
+  bytes pub_exchange = 5;
+}
+
+message ResourceStatus {
+  Channel channel = 5;
+  enum Status {
+    STARTING  = 0;
+    HEALTHY   = 1;
+    UNHEALTHY = 2;
+    STOPPED   = 3;
+  }
+  Status status = 10;
+}
+
+message Resources {
+  repeated ResourceStatus statuses = 1;
 }

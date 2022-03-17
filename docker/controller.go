@@ -127,6 +127,12 @@ func (c *Controller) processCreate(amqpMsg amqp.Delivery) {
 	c.sendStartResponse(queues, amqpMsg.CorrelationId, amqpMsg.ReplyTo, err)
 }
 
+func (c *Controller) processResources(corId string, replyTo string) {
+
+	anvils := c.Status()
+	c.sendResourcesResponse(anvils, corId, replyTo)
+}
+
 func (c *Controller) Handler(amqpMsg amqp.Delivery) {
 
 	c.log.Debugw("Get request",
@@ -134,7 +140,7 @@ func (c *Controller) Handler(amqpMsg amqp.Delivery) {
 		"ReplyTo", amqpMsg.ReplyTo)
 
 	if v, k := amqpMsg.Headers["endpoint"]; k {
-		c.log.Debug("Endpoint", v)
+		c.log.Debug("Endpoint: ", v)
 		if v == "ConductorService.Attach" {
 			go c.processCreate(amqpMsg)
 
@@ -143,6 +149,8 @@ func (c *Controller) Handler(amqpMsg amqp.Delivery) {
 			if err == nil {
 				c.processStop(request, amqpMsg.CorrelationId, amqpMsg.ReplyTo)
 			}
+		} else if v == "ConductorService.List" {
+			c.processResources(amqpMsg.CorrelationId, amqpMsg.ReplyTo)
 		}
 	}
 }
@@ -266,7 +274,8 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 				return fmt.Errorf("chan is closed")
 			}
 
-			if strings.Contains(msg.Status, "health_status:") {
+			if strings.Contains(msg.Status, "health_status:") ||
+				strings.Contains(msg.Action, "die") {
 
 				c.updateHealthStatus(msg)
 
@@ -288,6 +297,7 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 
 func (c *Controller) EventHandler(msg events.Message) {
 
+	fmt.Println("Docker msg:", msg)
 	c.eventStateMu.Lock()
 	defer c.eventStateMu.Unlock()
 	if msg.ID == "" {
@@ -300,7 +310,9 @@ func (c *Controller) EventHandler(msg events.Message) {
 		return
 	}
 
-	if strings.Contains(msg.Status, "health_status:") || strings.Contains(msg.Action, "stop") {
+	if strings.Contains(msg.Status, "health_status:") ||
+		strings.Contains(msg.Action, "stop") ||
+		strings.Contains(msg.Action, "die") {
 		c.updateHealthStatus(msg)
 	}
 
@@ -308,4 +320,22 @@ func (c *Controller) EventHandler(msg events.Message) {
 
 func (c *Controller) ErrorHandler(err error) {
 	fmt.Println(err)
+}
+
+func (c *Controller) Status() []AnvilResource {
+	c.anvilMutex.RLock()
+	defer c.anvilMutex.RUnlock()
+
+	var anvils []AnvilResource
+	for dockerId, anvil := range c.anvils {
+		resource := AnvilResource{
+			id:     dockerId,
+			queues: anvil.queues,
+			status: anvil.status,
+		}
+		anvils = append(anvils, resource)
+	}
+
+	return anvils
+
 }

@@ -19,15 +19,22 @@ type Queues struct {
 type AnvilStatus string
 
 const (
-	Starting AnvilStatus = "starting"
-	Healthy  AnvilStatus = "healthy"
-	Dead     AnvilStatus = "dead"
+	Starting  AnvilStatus = "starting"
+	Healthy   AnvilStatus = "healthy"
+	Unhealthy AnvilStatus = "unhealthy"
+	Stopped   AnvilStatus = "stopped"
 )
 
 type Anvil struct {
 	credsHash string
 	queues    Queues
 	status    AnvilStatus
+}
+
+type AnvilResource struct {
+	id     string
+	queues Queues
+	status AnvilStatus
 }
 
 type MetaTraderVersion int
@@ -140,14 +147,65 @@ func (c *Controller) sendStartResponse(queues Queues, corId string, replyTo stri
 	c.log.Debug("Create Anvil Send Answer")
 }
 
+func (c *Controller) sendResourcesResponse(anvils []AnvilResource, corId string, replyTo string) {
+	response, err := prepareResourcesResponse(anvils)
+
+	if err != nil {
+		c.log.Error("Can't prepare answer")
+		return
+	}
+
+	err = c.reply(response, corId, replyTo)
+	if err != nil {
+		c.log.Error("Couldn't send answer")
+		return
+	}
+	c.log.Debug("List Anvil Send Answer")
+
+}
 func prepareCreateResponse(anvilQueues Queues, errorStr string) ([]byte, error) {
+	channel := conductor.Channel{
+		RpcQueue:    []byte(anvilQueues.rpcQueue),
+		PubExchange: []byte(anvilQueues.publishExchange),
+	}
 	createResponse := conductor.AttachResponse{
-		RpcQueue: anvilQueues.rpcQueue,
-		Exchange: anvilQueues.publishExchange,
-		Error:    errorStr,
+		Channel: &channel,
+		Error:   errorStr,
 	}
 
 	bytes, err := proto.Marshal(&createResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes, nil
+}
+
+func prepareResourcesResponse(anvils []AnvilResource) ([]byte, error) {
+
+	st := conductor.Resources{}
+
+	for _, anvil := range anvils {
+
+		channel := conductor.Channel{
+			RpcQueue:    []byte(anvil.queues.rpcQueue),
+			PubExchange: []byte(anvil.queues.publishExchange),
+		}
+		status := conductor.ResourceStatus_STOPPED
+		if anvil.status == Starting {
+			status = conductor.ResourceStatus_STARTING
+		} else if anvil.status == Healthy {
+			status = conductor.ResourceStatus_STARTING
+		}
+		resourceStatus := conductor.ResourceStatus{
+			Channel: &channel,
+			Status:  status,
+		}
+		st.Statuses = append(st.Statuses, &resourceStatus)
+
+	}
+
+	bytes, err := proto.Marshal(&st)
 	if err != nil {
 		return nil, err
 	}

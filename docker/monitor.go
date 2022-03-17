@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -14,9 +15,13 @@ func (c *Controller) updateHealthStatus(msg events.Message) {
 		if strings.Contains(msg.Status, "healthy") {
 			anv.status = Healthy
 			c.log.Debug("Now container is healthy")
+		} else if strings.Contains(msg.Status, "unhealthy") {
+			anv.status = Unhealthy
+		} else if strings.Contains(msg.Status, "starting") {
+			anv.status = Starting
 		} else {
-			anv.status = Dead
-			c.log.Debug("Now container is unhealthy")
+			anv.status = Stopped
+			c.log.Debug("Now container is stoped")
 		}
 	}
 	c.anvilMutex.Unlock()
@@ -30,11 +35,7 @@ func (c *Controller) CleanUp() {
 	c.RestoreStatus()
 
 	for id, anv := range c.anvils {
-		if anv.status == Dead {
-			err := c.docker.Stop(id)
-			if err != nil {
-				c.log.Debug("Error while killing container with ID: ", id)
-			}
+		if anv.status == Stopped {
 			c.anvilMutex.Lock()
 			delete(c.anvils, id)
 			c.anvilMutex.Unlock()
@@ -119,11 +120,18 @@ func (c *Controller) RestoreStatus() {
 			c.log.Error("Couldn't get health status of container: ", id)
 			continue
 		}
-		status := Dead
+		fmt.Println("Restore status: ", hl)
+		status := Stopped
 		if hl == "healthy" {
 			status = Healthy
+		} else if hl == "starting" {
+			status = Starting
+		} else if hl == "unhealthy" {
+			status = Stopped
+			c.log.Debug("anvil status stopped: ", hl)
+			continue
 		} else {
-			c.log.Debug("Ignore unhealthy anvil")
+			c.log.Debug("Unknown anvil status: ", hl)
 			continue
 		}
 

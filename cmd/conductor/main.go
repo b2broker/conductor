@@ -74,10 +74,10 @@ func main() {
 	dClient := docker.NewClient(context.Background())
 
 	controller := docker.NewController(dClient, rabbit, settings, log)
-	err = controller.PullAnvil()
-	if err != nil {
-		log.Panicf("could not pull image: %v", err)
-	}
+	//err = controller.PullAnvil()
+	//if err != nil {
+	//	log.Panicf("could not pull image: %v", err)
+	//}
 	controller.RestoreStatus()
 
 	go rabbit.Read(controller.Handler)
