@@ -1,0 +1,33 @@
+---
+version: "0.0.1"
+
+resources:
+  - name: anvil-mt4
+    image: vcshl.b2broker.tech:5050/tor/anvil/anvil_art/anvil:3.0.3
+    environment:
+      - MT_ADDRESS=${address}
+      - MT_LOGIN=${login}
+      - MT_PASSWORD=${password}
+      - AMQP_HOST=${amqp_host}
+      - AMQP_PORT=${amqp_port}
+      - AMQP_USER=${amqp_user}
+      - AMQP_PASSWORD=${amqp_password}
+      - AMQP_RPC_EXCHANGE=${exchange}
+      - AMQP_RPC_QUEUE=${rpc_queue}
+      - AMQP_PUBLISH_EXCHANGE=${pub_exchange}
+      - MT_VERSION=4
+      - MT_TIMEOUT_MS=10000
+      - MT_MIN_FREE_ARTS=5
+      - MT_MAX_ARTS=10
+      - AMQP_RPC_HEARTBEAT=5
+      - AMQP_MIN_FREE_CHANNELS=5
+      - AMQP_MAX_CHANNELS=10
+      - SUICIDE_MINUTES=10
+      - PUMP_LIVE_TEST_WAIT_SEC=30
+      - JAEGER_AGENT_HOST_PORT=jaeger:6831
+      - JAEGER_SAMPLER_TYPE=const
+      - JAEGER_SAMPLER_PARAM=5
+      - PROMETHEUS_HOST=anvil-mt5
+      - PROMETHEUS_PORT=8080
+      - LOG_AS_JSON=1
+...

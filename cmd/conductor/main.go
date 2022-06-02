@@ -14,16 +14,16 @@ import (
 func main() {
 
 	rawJSON := []byte(`{
-   "level": "debug",
-   "encoding": "json",
-   "outputPaths": ["stdout"],
-   "errorOutputPaths": ["stderr"],
-   "encoderConfig": {
-     "messageKey": "message",
-     "levelKey": "level",
-     "levelEncoder": "lowercase"
-   }
- }`)
+	"level": "debug",
+	"encoding": "json",
+	"outputPaths": ["stdout"],
+	"errorOutputPaths": ["stderr"],
+	"encoderConfig": {
+		"messageKey": "message",
+		"levelKey": "level",
+		"levelEncoder": "lowercase"
+	}
+	}`)
 	var cfg zap.Config
 	if err := json.Unmarshal(rawJSON, &cfg); err != nil {
 		panic(err)
