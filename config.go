@@ -22,12 +22,12 @@ type ResourceName string
 
 type DockerImage string
 
-type EnvironmentVariable string
+type KeyEqualValue *string
 
 type Resource struct {
 	Name        ResourceName
 	Image       DockerImage
-	Environment []EnvironmentVariable
+	Environment []KeyEqualValue
 }
 
 type ConductorConfig struct {
