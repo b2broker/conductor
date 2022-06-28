@@ -1,4 +1,4 @@
-FROM golang:1.17-alpine
+FROM --platform=${BUILDPLATFORM} golang:1.17.3-alpine
 WORKDIR $GOPATH/src/github.com/b2broker/conductor/cmd/puppet
 ENV CGO_ENABLED=0
 COPY . .
