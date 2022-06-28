@@ -1,29 +1,26 @@
 Conductor
 ===
 
-Abstract
+Приложение Conductor призвано решить проблему управления динамическими 
+созданными экземплярами сервисов, и вести учёт их подписчиков.
+
+Современные среды оркестрации сервисов предлагают управление жизнью групп, и 
+отдельных экземпляров сервисов, а также, в некоторых случаях следят за их 
+доступностью и масштабированием. Однако, сами по себе не решают задачи по 
+динамическому выделению / устранению сервисов, и групп сервисов, исходя из 
+уникальности их настроек.
+
+Именно эта задача ставиться перед сервисом Conductor.
+
+Principles
 ---
 
-This application is intended to provide a level of autonomy during resource 
-allocation and their further discovery and management.
+Be passive most of the time, be active in just one thing
 
-The basic pipeline will looks like this:
+How
+---
 
-```mermaid
-stateDiagram-v2
-    state "Initialize application" as Init
-    state "Load previous state" as LoadState
+### Install
 
-    state "Start processing AMQP" as StartProcessing
-    state "Process AMQP requests" as ProcessRequest
-    state "Stop processing AMQP" as StopProcessing
-    
-    state "Estimate connection to Environment" as StartProcessing
-    state "Stop processing AMQP" as StartProcessing
-    
-    state "Start health server" as StartProcessing
-    state "Stop health server" as StartProcessing
-    
-    state "Backtrace changes on pods" as BackTrace
-    state "1" as Init
-```
+### Use
+
