@@ -28,4 +28,14 @@ func main() {
 	for _, container := range containers {
 		log.Println(container.ID, container.State, container.Image)
 	}
+
+	events, errors := cli.Events(ctx, types.EventsOptions{})
+	for {
+		select {
+		case event := <-events:
+			log.Println(event.ID, event.Status, event.Actor.Attributes["container"], event.Actor.Attributes["image"])
+		case err := <-errors:
+			log.Fatalln(err)
+		}
+	}
 }
