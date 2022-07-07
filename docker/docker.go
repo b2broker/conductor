@@ -20,16 +20,18 @@ type Client struct {
 	cli *client.Client
 }
 
-func NewClient(ctx context.Context) *Client {
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+func NewClient(ctx context.Context) (*Client, error) {
+	cli, err := client.NewClientWithOpts(
+		client.FromEnv,
+		client.WithAPIVersionNegotiation(),
+	)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-
 	return &Client{
 		ctx: ctx,
 		cli: cli,
-	}
+	}, nil
 }
 
 func (d *Client) Pull(imgRef string, authStr string) error {

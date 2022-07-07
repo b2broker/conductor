@@ -24,10 +24,10 @@ type Settings struct {
 }
 
 type Controller struct {
+	settings Settings
 	docker   *Client
 	anvils   map[string]*Anvil
 	rabbit   *rabbitmq.Rabbit
-	settings Settings
 	log      *zap.SugaredLogger
 
 	eventState   map[string]chan events.Message
@@ -35,15 +35,20 @@ type Controller struct {
 	anvilMutex   sync.RWMutex
 }
 
-func NewController(d *Client, r *rabbitmq.Rabbit, settings Settings, logger *zap.SugaredLogger) *Controller {
+func NewController(
+	cli *Client,
+	rmq *rabbitmq.Rabbit,
+	settings Settings,
+	logger *zap.SugaredLogger,
+) (*Controller, error) {
 	return &Controller{
-		docker:     d,
-		rabbit:     r,
 		settings:   settings,
+		docker:     cli,
+		rabbit:     rmq,
 		anvils:     make(map[string]*Anvil),
 		log:        logger,
 		eventState: make(map[string]chan events.Message),
-	}
+	}, nil
 }
 
 func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {

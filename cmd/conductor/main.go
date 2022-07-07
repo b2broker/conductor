@@ -80,19 +80,21 @@ func main() {
 		log.Panic(err)
 	}
 
-	//создавать коннект в main, и контролировать
-	dClient := docker.NewClient(context.Background())
+	dockerCli, err := docker.NewClient(context.Background())
+	if err != nil {
+		log.Panic(err)
+	}
+	// original dockerCli have Close method
 
-	controller := docker.NewController(dClient, rabbit, settings, log)
-	//err = controller.PullAnvil()
-	//if err != nil {
-	//	log.Panicf("could not pull image: %v", err)
-	//}
+	controller, err := docker.NewController(dockerCli, rabbit, settings, log)
+	if err != nil {
+		log.Panic(err)
+	}
 	controller.RestoreStatus()
 
 	go rabbit.Read(controller.Handler)
 
-	dClient.Events(controller.EventHandler, controller.ErrorHandler)
+	dockerCli.Events(controller.EventHandler, controller.ErrorHandler)
 
 	//var wg sync.WaitGroup
 	//wg.Add(1)

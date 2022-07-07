@@ -50,7 +50,6 @@ func (c *Controller) RestoreStatus() {
 	containersConfig := c.docker.ReadEnv()
 
 	for id, config := range containersConfig {
-
 		// TODO save const
 		if !strings.Contains(config.Image, "anvil") {
 			continue
