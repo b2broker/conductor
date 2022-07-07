@@ -2,17 +2,16 @@ package main
 
 import (
 	"encoding/json"
-	"os"
-	"strconv"
+	"log"
 
 	"github.com/b2broker/conductor/docker"
+	"github.com/b2broker/conductor/options"
 	"github.com/b2broker/conductor/rabbitmq"
 	"github.com/docker/distribution/context"
 	"go.uber.org/zap"
 )
 
 func main() {
-
 	rawJSON := []byte(`{
    "level": "debug",
    "encoding": "json",
@@ -24,39 +23,52 @@ func main() {
      "levelEncoder": "lowercase"
    }
  }`)
+
 	var cfg zap.Config
+
 	if err := json.Unmarshal(rawJSON, &cfg); err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
+
 	logger, err := cfg.Build()
 	if err != nil {
-		panic(err)
+		log.Panicln(err)
 	}
 
 	defer logger.Sync() // flushes buffer, if any
 	log := logger.Sugar()
 
-	amqpHost := os.Getenv("AMQP_HOST")
-	amqpQueue := os.Getenv("AMQP_QUEUE")
-	imgRef := os.Getenv("IMG_PULL")
-	dockerLogin := os.Getenv("DOCKER_LOGIN")
-	dockerPass := os.Getenv("DOCKER_PASS")
-	dockerNetwork := os.Getenv("DOCKER_NETWORK")
-	amqpExternal := os.Getenv("AMQP_EXTERNAL_NAME")
+	var (
+		amqpDsn        string = "amqp://guest:guest@rabbitmq" // DSN record
+		startupTimeout int64  = 5                             // In seconds
+		rpcQueue       string = "conductor"                   // RPC queue to serve on
+	)
 
-	startTimeout, err := strconv.Atoi(os.Getenv("START_TIMEOUT_MINS"))
+	opts, err := options.Configure([]options.Option{
+		options.AmqpDSN("AMQP_DSN", amqpDsn),
+		options.RegistryLogin("REGISTRY_LOGIN"),
+		options.RegistryPassword("REGISTRY_PASS"),
+		options.RPCQueue("CONDUCTOR_RPC_QUEUE", rpcQueue),
+		options.StartupTimeout("STARTUP_TIMEOUT", startupTimeout),
+		options.AttachableNetwork("ATTACH_NETWORK"),
+		// TODO: should be removed
+		options.DockerImage("DOCKER_IMAGE"),
+	}...)
+
 	if err != nil {
-		log.Warn("START_TIMEOUT_MINS is not set. 5 minutes by default")
-		startTimeout = 5
+		log.Panic(err)
 	}
 
 	settings := docker.Settings{
-		AmqpHost:         amqpHost,
-		AuthToken:        docker.AuthSrt(dockerLogin, dockerPass),
-		ImgRef:           imgRef,
-		NetworkName:      dockerNetwork,
-		AmqpExternalName: amqpExternal,
-		StartTimeout:     startTimeout,
+		AmqpHost: opts.AmqpDSN().String(),
+		AuthToken: docker.AuthSrt(
+			opts.RegistryLogin(),
+			opts.RegistryPassword(),
+		),
+		StartTimeout:     int(opts.StartupTimeout().Minutes()),
+		NetworkName:      opts.AttachableNetwork(),
+		AmqpExternalName: opts.RPCQueue(),
+		ImgRef:           opts.DockerImage(),
 	}
 
 	//TODO закрытие соединения
@@ -65,7 +77,11 @@ func main() {
 	//	log.Panicf("could not connect to amqp: %v", err)
 	//}
 
-	rabbit, err := rabbitmq.NewRabbit(amqpHost, amqpQueue, false)
+	rabbit, err := rabbitmq.NewRabbit(
+		opts.AmqpDSN().String(),
+		opts.AmqpDSN().Path,
+		false,
+	)
 	if err != nil {
 		log.Panicf("could not connect to rabbit: %v", err)
 	}
