@@ -173,7 +173,7 @@ func (c *Controller) startAnvil(request AnvilRequest) (string, Queues, error) {
 	env := []string{fmt.Sprintf("MT_ADDRESS=%s", request.server),
 		fmt.Sprintf("MT_LOGIN=%d", request.login),
 		fmt.Sprintf("MT_PASSWORD=%s", request.password),
-		fmt.Sprintf("AMQP_HOST=%s", c.settings.AmqpExternalName),
+		fmt.Sprintf("AMQP_HOST=%s", c.settings.AmqpExternalName), // host
 		fmt.Sprintf("AMQP_RPC_QUEUE=%s", rpcQueue),
 		fmt.Sprintf("AMQP_PUBLISH_EXCHANGE=%s", publishExchange)}
 

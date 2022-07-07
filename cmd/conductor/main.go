@@ -39,9 +39,9 @@ func main() {
 	log := logger.Sugar()
 
 	var (
-		amqpDsn        string = "amqp://guest:guest@rabbitmq" // DSN record
-		startupTimeout int64  = 5                             // In seconds
-		rpcQueue       string = "conductor"                   // RPC queue to serve on
+		amqpDsn        string = "amqp://guest:guest@127.0.0.1:5672" // DSN record
+		startupTimeout int64  = 5                                   // In seconds
+		rpcQueue       string = "conductor"                         // RPC queue to serve on
 	)
 
 	opts, err := options.Configure([]options.Option{
@@ -65,25 +65,19 @@ func main() {
 			opts.RegistryLogin(),
 			opts.RegistryPassword(),
 		),
-		StartTimeout:     int(opts.StartupTimeout().Minutes()),
-		NetworkName:      opts.AttachableNetwork(),
-		AmqpExternalName: opts.RPCQueue(),
+		StartTimeout: int(opts.StartupTimeout().Minutes()),
+		NetworkName:  opts.AttachableNetwork(),
+		// TODO: should be removed
+		AmqpExternalName: opts.AmqpDSN().Hostname(),
 		ImgRef:           opts.DockerImage(),
 	}
 
-	//TODO закрытие соединения
-	//connectRabbitMQ, err := rabbitmq.Dial(amqpHost)
-	//if err != nil {
-	//	log.Panicf("could not connect to amqp: %v", err)
-	//}
-
 	rabbit, err := rabbitmq.NewRabbit(
 		opts.AmqpDSN().String(),
-		opts.AmqpDSN().Path,
-		false,
+		opts.RPCQueue(),
 	)
 	if err != nil {
-		log.Panicf("could not connect to rabbit: %v", err)
+		log.Panic(err)
 	}
 
 	//создавать коннект в main, и контролировать

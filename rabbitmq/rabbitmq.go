@@ -15,36 +15,35 @@ type Rabbit struct {
 	Queue      amqp.Queue
 }
 
-func NewRabbit(amqpHost string, queueName string, exclusive bool) (*Rabbit, error) {
-
-	rabbitmq.Debug = true
-	con, err := rabbitmq.Dial(amqpHost)
-	if err != nil {
-		log.Panic(err)
-	}
-
-	channelRabbitMQ, err := con.Channel()
+func NewRabbit(amqpDsn string, rpcQueue string) (*Rabbit, error) {
+	conn, err := rabbitmq.Dial(amqpDsn)
 	if err != nil {
 		return nil, err
 	}
+	log.Println("Connection to RabbitMQ established")
+	defer conn.Close()
 
-	qName := ""
-	if exclusive == false {
-		qName = queueName
+	ch, err := conn.Channel()
+	if err != nil {
+		return nil, err
 	}
-	q, err := channelRabbitMQ.QueueDeclare(
-		qName,     // name
-		true,      // durable
-		false,     // delete when unused
-		exclusive, // exclusive
-		false,     // no-wait
-		nil,       // arguments
+	log.Println("RabbitMQ channel opened")
+	defer ch.Close()
+
+	q, err := ch.QueueDeclare(
+		rpcQueue, // name
+		true,     // durable
+		false,    // delete when unused
+		false,    // exclusive
+		false,    // no-wait
+		nil,      // arguments
 	)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
+	log.Println("Queue in RabbitMQ was declared")
 
-	messages, err := channelRabbitMQ.Consume(
+	messages, err := ch.Consume(
 		q.Name, // consume name
 		"",     // consumer
 		true,   // auto-ack
@@ -56,8 +55,14 @@ func NewRabbit(amqpHost string, queueName string, exclusive bool) (*Rabbit, erro
 	if err != nil {
 		return nil, err
 	}
+	log.Println("Consuming messages from RabbitMQ started")
 
-	return &Rabbit{connection: con, channel: channelRabbitMQ, consume: messages, Queue: q}, nil
+	return &Rabbit{
+		connection: conn,
+		channel:    ch,
+		consume:    messages,
+		Queue:      q,
+	}, nil
 }
 
 func (r *Rabbit) Stop() {
