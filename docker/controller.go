@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -50,14 +51,11 @@ func NewController(
 		log:        logger,
 		eventState: make(map[string]chan events.Message),
 	}
-
 	if err := controller.init(); err != nil {
 		return nil, err
 	}
 
-	if err := controller.trackChanges(); err != nil {
-		return nil, err
-	}
+	go controller.trackChanges()
 
 	return controller, nil
 }
@@ -95,8 +93,26 @@ func (c *Controller) init() error {
 	return nil
 }
 
-func (c *Controller) trackChanges() error {
-	return nil
+func (c *Controller) trackChanges() {
+	log.Println("Start tracking")
+	events, errors := c.docker.Events([]string{c.settings.ImgRef})
+	for {
+		select {
+		case event := <-events:
+			switch ContainerEventAction(event.Action) {
+			case Destroy:
+				log.Println(event)
+			case Die:
+				log.Println(event)
+			case Start:
+				log.Println(event)
+			case Stop:
+				log.Println(event)
+			}
+		case err := <-errors:
+			log.Println(err)
+		}
+	}
 }
 
 func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
@@ -116,28 +132,28 @@ func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
 
 func (c *Controller) findOrCreate(request AnvilRequest) (Queues, error) {
 
-	hash := anvilHash(request.server, request.login, request.password)
-	c.log.Debugf("start new anvil. server: %s login: %d password: %s", request.server, request.login, request.password)
+	// hash := anvilHash(request.server, request.login, request.password)
+	// c.log.Debugf("start new anvil. server: %s login: %d password: %s", request.server, request.login, request.password)
 
-	err := c.StartAndWait(request, hash)
-	if err != nil {
-		c.log.Error("error while start Anvil", err)
-		return Queues{}, err
-	}
+	// err := c.StartAndWait(request, hash)
+	// if err != nil {
+	// 	c.log.Error("error while start Anvil", err)
+	// 	return Queues{}, err
+	// }
 
-	_, anvil, err := c.findAnvil(hash)
+	// _, anvil, err := c.findAnvil(hash)
 
-	if err != nil {
-		c.log.Error("error after start Anvil", err)
-		return Queues{}, err
-	}
+	// if err != nil {
+	// 	c.log.Error("error after start Anvil", err)
+	// 	return Queues{}, err
+	// }
 
-	if anvil.status != Healthy {
-		c.log.Error("Anvil unhealthy")
-		return Queues{}, fmt.Errorf("anvil unhealthy")
-	}
+	// if anvil.status != Healthy {
+	// 	c.log.Error("Anvil unhealthy")
+	// 	return Queues{}, fmt.Errorf("anvil unhealthy")
+	// }
 
-	return anvil.queues, nil
+	return Queues{}, nil
 }
 
 func (c *Controller) processStop(request AnvilRequest, corId string, replyTo string) {
@@ -286,7 +302,7 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 				rpcQueue:        anvilQueues.rpcQueue,
 				publishExchange: anvilQueues.publishExchange,
 			},
-			status: Starting,
+			status: Ready,
 		}
 		c.anvilMu.Unlock()
 

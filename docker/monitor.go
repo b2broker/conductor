@@ -11,19 +11,19 @@ import (
 func (c *Controller) updateHealthStatus(msg events.Message) {
 	c.anvilMu.Lock()
 
-	if anv, ok := c.anvils[msg.ID]; ok {
-		if strings.Contains(msg.Status, "healthy") {
-			anv.status = Healthy
-			c.log.Debug("Now container is healthy")
-		} else if strings.Contains(msg.Status, "unhealthy") {
-			anv.status = Unhealthy
-		} else if strings.Contains(msg.Status, "starting") {
-			anv.status = Starting
-		} else {
-			anv.status = Stopped
-			c.log.Debug("Now container is stoped")
-		}
-	}
+	// if anv, ok := c.anvils[msg.ID]; ok {
+	// 	if strings.Contains(msg.Status, "healthy") {
+	// 		anv.status = Healthy
+	// 		c.log.Debug("Now container is healthy")
+	// 	} else if strings.Contains(msg.Status, "unhealthy") {
+	// 		anv.status = Unhealthy
+	// 	} else if strings.Contains(msg.Status, "starting") {
+	// 		anv.status = Starting
+	// 	} else {
+	// 		anv.status = Stopped
+	// 		c.log.Debug("Now container is stoped")
+	// 	}
+	// }
 	c.anvilMu.Unlock()
 
 	c.CleanUp()
@@ -31,18 +31,18 @@ func (c *Controller) updateHealthStatus(msg events.Message) {
 
 func (c *Controller) CleanUp() {
 
-	c.log.Debug("CleanUp")
-	c.RestoreStatus()
+	// c.log.Debug("CleanUp")
+	// c.RestoreStatus()
 
-	for id, anv := range c.anvils {
-		if anv.status == Stopped {
-			c.anvilMu.Lock()
-			delete(c.anvils, id)
-			c.anvilMu.Unlock()
+	// for id, anv := range c.anvils {
+	// 	if anv.status == Stopped {
+	// 		c.anvilMu.Lock()
+	// 		delete(c.anvils, id)
+	// 		c.anvilMu.Unlock()
 
-			c.log.Debug("Container with ID: ", id, " was deleted from map")
-		}
-	}
+	// 		c.log.Debug("Container with ID: ", id, " was deleted from map")
+	// 	}
+	// }
 
 }
 
@@ -120,13 +120,13 @@ func (c *Controller) RestoreStatus() {
 			continue
 		}
 		fmt.Println("Restore status: ", hl)
-		status := Stopped
+		status := NotReady
 		if hl == "healthy" {
-			status = Healthy
+			status = Ready
 		} else if hl == "starting" {
-			status = Starting
+			status = NotReady
 		} else if hl == "unhealthy" {
-			status = Stopped
+			status = NotReady
 			c.log.Debug("anvil status stopped: ", hl)
 			continue
 		} else {

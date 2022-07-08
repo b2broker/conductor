@@ -84,26 +84,17 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
-	// original dockerCli have Close method
+	// TODO: original dockerCli have Close method
 
 	controller, err := docker.NewController(dockerCli, rabbit, settings, log)
 	if err != nil {
 		log.Panic(err)
 	}
 
-	go rabbit.Read(controller.Handler)
+	var forever <-chan struct{}
 
-	dockerCli.Events(controller.EventHandler, controller.ErrorHandler)
+	log.Info(controller)
+	<-forever
 
-	//var wg sync.WaitGroup
-	//wg.Add(1)
-	//go func() {
-	//	dClient.Events(controller.EventHandler, controller.ErrorHandler)
-	//	wg.Done()
-	//}()
-	//
-	//wg.Wait()
-
-	//	отслеживать сигнал, graceful shutdown
-
+	// go rabbit.Read(controller.Handler)
 }

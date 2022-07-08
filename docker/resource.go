@@ -3,6 +3,7 @@ package docker
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"log"
 	"net/url"
 	"strings"
 	"sync"
@@ -29,6 +30,15 @@ const (
 	Starting      ContainerHealthStatus = types.Starting
 	Healthy       ContainerHealthStatus = types.Healthy
 	Unhealthy     ContainerHealthStatus = types.Unhealthy
+)
+
+type ContainerEventAction string
+
+const (
+	Destroy ContainerEventAction = "destroy"
+	Die     ContainerEventAction = "die"
+	Start   ContainerEventAction = "start"
+	Stop    ContainerEventAction = "stop"
 )
 
 type Instance struct {
@@ -73,15 +83,15 @@ func (i *Instance) Envs() (url.Values, error) {
 }
 
 func (i *Instance) Env(name string) (values []string, ok bool) {
-	i.envsMu.Lock()
-	defer i.envsMu.Unlock()
-
 	if len(i.envs) == 0 && len(i.ContainerJSON.Config.Env) > 0 {
-		if _, err := i.Envs(); err == nil {
+		if _, err := i.Envs(); err != nil {
+			log.Println(err)
 			return nil, false
 		}
 	}
 
+	i.envsMu.RLock()
+	i.envsMu.RUnlock()
 	values, ok = i.envs[name]
 	return
 }

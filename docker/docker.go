@@ -106,18 +106,18 @@ func (d *Client) Stop(id string) error {
 	return nil
 }
 
-func (d *Client) Events(onEvent func(message events.Message), onError func(err error)) {
-	c1, c2 := d.cli.Events(d.ctx, types.EventsOptions{})
+// func (d *Client) Events(onEvent func(message events.Message), onError func(err error)) {
+// 	c1, c2 := d.cli.Events(d.ctx, types.EventsOptions{})
 
-	for {
-		select {
-		case msg := <-c1:
-			onEvent(msg)
-		case err := <-c2:
-			onError(err)
-		}
-	}
-}
+// 	for {
+// 		select {
+// 		case msg := <-c1:
+// 			onEvent(msg)
+// 		case err := <-c2:
+// 			onError(err)
+// 		}
+// 	}
+// }
 
 func (d *Client) HealthStatus(id string) (string, error) {
 
@@ -201,6 +201,16 @@ func (d *Client) Containers(images []string) (Resources, error) {
 		resources.Add(instance, hash)
 	}
 	return resources, nil
+}
+
+func (d *Client) Events(images []string) (<-chan events.Message, <-chan error) {
+	opts := types.EventsOptions{}
+	opts.Filters = filters.NewArgs()
+	opts.Filters.Add("type", events.ContainerEventType)
+	for _, image := range images {
+		opts.Filters.Add("image", image)
+	}
+	return d.cli.Events(d.ctx, opts)
 }
 
 func AuthSrt(user string, pass string) string {
