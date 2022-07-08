@@ -90,7 +90,6 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
-	controller.RestoreStatus()
 
 	go rabbit.Read(controller.Handler)
 

@@ -19,10 +19,8 @@ type Queues struct {
 type AnvilStatus string
 
 const (
-	Starting  AnvilStatus = "starting"
-	Healthy   AnvilStatus = "healthy"
-	Unhealthy AnvilStatus = "unhealthy"
-	Stopped   AnvilStatus = "stopped"
+	NotReady AnvilStatus = "notready"
+	Ready    AnvilStatus = "ready"
 )
 
 type Anvil struct {

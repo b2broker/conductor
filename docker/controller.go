@@ -26,13 +26,14 @@ type Settings struct {
 type Controller struct {
 	settings Settings
 	docker   *Client
-	anvils   map[string]*Anvil
 	rabbit   *rabbitmq.Rabbit
 	log      *zap.SugaredLogger
 
-	eventState   map[string]chan events.Message
 	eventStateMu sync.RWMutex
-	anvilMutex   sync.RWMutex
+	eventState   map[string]chan events.Message
+
+	anvilMu sync.RWMutex
+	anvils  map[string]*Anvil
 }
 
 func NewController(
@@ -41,20 +42,67 @@ func NewController(
 	settings Settings,
 	logger *zap.SugaredLogger,
 ) (*Controller, error) {
-	return &Controller{
+	controller := &Controller{
 		settings:   settings,
 		docker:     cli,
 		rabbit:     rmq,
 		anvils:     make(map[string]*Anvil),
 		log:        logger,
 		eventState: make(map[string]chan events.Message),
-	}, nil
+	}
+
+	if err := controller.init(); err != nil {
+		return nil, err
+	}
+
+	if err := controller.trackChanges(); err != nil {
+		return nil, err
+	}
+
+	return controller, nil
+}
+
+func (c *Controller) init() error {
+	resources, err := c.docker.Containers([]string{c.settings.ImgRef})
+	if err != nil {
+		return err
+	}
+
+	for hash, instances := range resources {
+		for _, instance := range instances {
+			pub, _ := instance.Env("AMQP_PUBLISH_EXCHANGE")
+			rpc, _ := instance.Env("AMQP_RPC_QUEUE")
+
+			status := NotReady
+			if instance.State() == Running &&
+				(instance.Status() == NoHealthcheck || instance.Status() == Healthy) {
+				status = Ready
+			}
+
+			c.anvilMu.Lock()
+			c.anvils[instance.ID()] = &Anvil{
+				credsHash: string(hash),
+				queues: Queues{
+					rpcQueue:        strings.Join(rpc, ""),
+					publishExchange: strings.Join(pub, ""),
+				},
+				status: status,
+			}
+			c.anvilMu.Unlock()
+		}
+	}
+
+	return nil
+}
+
+func (c *Controller) trackChanges() error {
+	return nil
 }
 
 func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
 
-	c.anvilMutex.RLock()
-	defer c.anvilMutex.RUnlock()
+	c.anvilMu.RLock()
+	defer c.anvilMu.RUnlock()
 
 	for dockerId, anvil := range c.anvils {
 		if anvil.credsHash == hash {
@@ -110,9 +158,9 @@ func (c *Controller) processStop(request AnvilRequest, corId string, replyTo str
 	if err != nil {
 		errSrt = err.Error()
 	} else {
-		c.anvilMutex.Lock()
+		c.anvilMu.Lock()
 		delete(c.anvils, id)
-		c.anvilMutex.Unlock()
+		c.anvilMu.Unlock()
 	}
 
 	c.sendStopResponse(errSrt, corId, replyTo)
@@ -231,7 +279,7 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 	c.eventState[anvilID] = eventsChan
 
 	if err == nil {
-		c.anvilMutex.Lock()
+		c.anvilMu.Lock()
 		c.anvils[anvilID] = &Anvil{
 			credsHash: hash,
 			queues: Queues{
@@ -240,7 +288,7 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 			},
 			status: Starting,
 		}
-		c.anvilMutex.Unlock()
+		c.anvilMu.Unlock()
 
 	}
 
@@ -328,8 +376,8 @@ func (c *Controller) ErrorHandler(err error) {
 }
 
 func (c *Controller) Status() []AnvilResource {
-	c.anvilMutex.RLock()
-	defer c.anvilMutex.RUnlock()
+	c.anvilMu.RLock()
+	defer c.anvilMu.RUnlock()
 
 	var anvils []AnvilResource
 	for dockerId, anvil := range c.anvils {

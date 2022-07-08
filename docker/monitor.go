@@ -9,7 +9,7 @@ import (
 )
 
 func (c *Controller) updateHealthStatus(msg events.Message) {
-	c.anvilMutex.Lock()
+	c.anvilMu.Lock()
 
 	if anv, ok := c.anvils[msg.ID]; ok {
 		if strings.Contains(msg.Status, "healthy") {
@@ -24,7 +24,7 @@ func (c *Controller) updateHealthStatus(msg events.Message) {
 			c.log.Debug("Now container is stoped")
 		}
 	}
-	c.anvilMutex.Unlock()
+	c.anvilMu.Unlock()
 
 	c.CleanUp()
 }
@@ -36,9 +36,9 @@ func (c *Controller) CleanUp() {
 
 	for id, anv := range c.anvils {
 		if anv.status == Stopped {
-			c.anvilMutex.Lock()
+			c.anvilMu.Lock()
 			delete(c.anvils, id)
-			c.anvilMutex.Unlock()
+			c.anvilMu.Unlock()
 
 			c.log.Debug("Container with ID: ", id, " was deleted from map")
 		}
@@ -142,10 +142,9 @@ func (c *Controller) RestoreStatus() {
 			},
 			status: status,
 		}
-		c.anvilMutex.Lock()
+		c.anvilMu.Lock()
 		c.anvils[id] = &anvil
-		c.anvilMutex.Unlock()
+		c.anvilMu.Unlock()
 		c.log.Debug("Add anvil with hash:", anvilHash)
 	}
-
 }

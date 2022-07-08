@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
+	"strings"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 )
@@ -146,6 +149,58 @@ func (d *Client) ReadEnv() map[string]container.Config {
 	}
 
 	return containersList
+}
+
+func (d *Client) Containers(images []string) (Resources, error) {
+	opts := types.ContainerListOptions{All: true}
+	opts.Filters = filters.NewArgs()
+	for _, image := range images {
+		opts.Filters.Add("ancestor", image)
+	}
+	containers, err := d.cli.ContainerList(d.ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	resources := make(Resources, len(containers))
+	for _, container := range containers {
+		info, err := d.cli.ContainerInspect(d.ctx, container.ID)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		instance := NewInstance(info)
+		address, ok := instance.Env("MT_ADDRESS")
+		if !ok {
+			continue
+		}
+		login, ok := instance.Env("MT_LOGIN")
+		if !ok {
+			continue
+		}
+		password, ok := instance.Env("MT_PASSWORD")
+		if !ok {
+			continue
+		}
+
+		if _, ok := instance.Env("AMQP_PUBLISH_EXCHANGE"); !ok {
+			continue
+		}
+		if _, ok := instance.Env("AMQP_RPC_QUEUE"); !ok {
+			continue
+		}
+
+		hash, err := Hash(
+			strings.Join(address, ""),
+			strings.Join(login, ""),
+			strings.Join(password, ""),
+		)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		resources.Add(instance, hash)
+	}
+	return resources, nil
 }
 
 func AuthSrt(user string, pass string) string {
