@@ -83,7 +83,7 @@ func (c *Controller) RestoreStatus() error {
 			continue
 		}
 
-		publicExchange, ok := envs["AMQP_PUBLISH_EXCHANGE"]
+		pubExchange, ok := envs["AMQP_PUBLISH_EXCHANGE"]
 		if !ok {
 			c.log.Error("AMQP_PUBLISH_EXCHANGE env not found on container: ", id)
 			continue
@@ -114,8 +114,6 @@ func (c *Controller) RestoreStatus() error {
 			status = Starting
 		case types.Unhealthy:
 			status = Stopped
-			c.log.Debug("status stopped: ", health)
-			continue
 		default:
 			c.log.Debug("unknown container status: ", health)
 			continue
@@ -125,7 +123,7 @@ func (c *Controller) RestoreStatus() error {
 			credsHash: anvilHash,
 			queues: Queues{
 				rpcQueue:        rpcQueue,
-				publishExchange: publicExchange,
+				publishExchange: pubExchange,
 			},
 			status: status,
 		}
