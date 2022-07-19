@@ -11,16 +11,19 @@ import (
 func (c *Controller) updateHealthStatus(msg events.Message) {
 	c.anvilMutex.Lock()
 	if anv, ok := c.anvils[msg.ID]; ok {
-		if strings.Contains(msg.Status, "healthy") {
+		switch msg.Status {
+		case types.Healthy:
 			anv.status = Healthy
-			c.log.Debug("Now container is healthy")
-		} else if strings.Contains(msg.Status, "unhealthy") {
+			c.log.Debug("container is healthy")
+		case types.Unhealthy:
 			anv.status = Unhealthy
-		} else if strings.Contains(msg.Status, "starting") {
+			c.log.Debug("container is unhealthy")
+		case types.Starting:
 			anv.status = Starting
-		} else {
+			c.log.Debug("container is starting")
+		default:
 			anv.status = Stopped
-			c.log.Debug("Now container is stopped")
+			c.log.Debug("container is stopped")
 		}
 	}
 	c.anvilMutex.Unlock()

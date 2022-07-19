@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -242,42 +243,43 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 
 func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *Anvil, error) {
 	id, anvil, ok := c.findAnvil(hash)
-	if ok {
-		if anvil.status != Healthy {
-
+	var ch chan events.Message
+	if !ok {
+		id, queues, err := c.createAnvil(request)
+		if err != nil {
+			return "", nil, err
 		}
-		// TODO: probably it is not in a running stance
+
+		anvil = &Anvil{
+			credsHash: hash,
+			queues:    queues,
+			status:    Stopped,
+		}
+
+		c.eventStateMu.Lock()
+		ch, ok := c.eventState[id]
+		if !ok {
+			ch = make(chan events.Message, 1)
+			c.eventState[id] = ch
+		} else {
+			c.log.Warn("channel for container already exists")
+		}
+		c.eventStateMu.Unlock()
+
+		c.anvilMutex.Lock()
+		c.anvils[id] = anvil
+		c.anvilMutex.Unlock()
+	}
+
+	if anvil.status == Healthy {
 		return id, anvil, nil
 	}
 
-	id, queues, err := c.createAnvil(request)
-	if err != nil {
-		// Can't create new instance
+	if anvil.status == Stopped {
+		if err := c.startAnvil(id); err != nil {
+			return "", nil, err
+		}
 	}
-
-	if err := c.startAnvil(id); err != nil {
-		// Can't start new instance
-	}
-
-	// Add new channel to eventState map
-
-	c.eventStateMu.Lock()
-	ch, ok := c.eventState[id]
-	if !ok {
-		ch = make(chan events.Message, 1)
-		c.eventState[id] = ch
-	} else {
-		c.log.Warn("channel for container already exists")
-	}
-	c.eventStateMu.Unlock()
-
-	c.anvilMutex.Lock()
-	c.anvils[id] = &Anvil{
-		credsHash: hash,
-		queues:    queues,
-		status:    Starting,
-	}
-	c.anvilMutex.Unlock()
 
 	c.log.Debug("waiting for healthstatus")
 	c.log.Debug("StartTimeout", c.settings.StartTimeout)
@@ -287,7 +289,7 @@ func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *A
 		time.Duration(c.settings.StartTimeout)*time.Minute,
 	)
 
-	return c.WaitTillStart(ctx, ch, cancel)
+	return id, anvil, c.WaitTillStart(ctx, ch, cancel)
 }
 
 func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Message, cancel context.CancelFunc) error {
@@ -295,12 +297,10 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 		select {
 		case msg, ok := <-events:
 			if !ok {
-				return fmt.Errorf("chan is closed")
+				return errors.New("chan is closed")
 			}
 
-			if strings.Contains(msg.Status, "health_status:") ||
-				strings.Contains(msg.Action, "die") {
-
+			if strings.Contains(msg.Status, "health_status:") || msg.Action == "die" {
 				c.updateHealthStatus(msg)
 
 				c.eventStateMu.Lock()
@@ -334,8 +334,7 @@ func (c *Controller) EventHandler(msg events.Message) {
 	// TODO: When this will be triggered?
 	// In case not ok previous — means that we don't have such element in the map
 	if strings.Contains(msg.Status, "health_status:") ||
-		strings.Contains(msg.Action, "stop") ||
-		strings.Contains(msg.Action, "die") {
+		msg.Action == "stop" || msg.Action == "die" {
 		c.updateHealthStatus(msg)
 	}
 }
