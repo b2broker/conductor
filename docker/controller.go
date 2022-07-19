@@ -209,38 +209,6 @@ func (c *Controller) reply(answer []byte, corId string, replyTo string) error {
 	return nil
 }
 
-func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan events.Message, error) {
-	// if err != nil {
-	// 	c.log.Errorw("can't create container", "error", err)
-	// 	return "", Queues{}, err
-	// }
-
-	c.eventStateMu.Lock()
-	defer c.eventStateMu.Unlock()
-	if ch, ok := c.eventState[id]; ok {
-		c.log.Warn("channel for container already exists")
-		return ch, nil
-	}
-
-	events := make(chan events.Message, 1)
-	c.eventState[id] = events
-
-	if err == nil {
-		c.anvilMutex.Lock()
-		c.anvils[id] = &Anvil{
-			credsHash: hash,
-			queues: Queues{
-				rpcQueue:        queues.rpcQueue,
-				publishExchange: queues.publishExchange,
-			},
-			status: Starting,
-		}
-		c.anvilMutex.Unlock()
-	}
-
-	return events, err
-}
-
 func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *Anvil, error) {
 	id, anvil, ok := c.findAnvil(hash)
 	var ch chan events.Message
@@ -308,13 +276,13 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 					close(ch)
 					delete(c.eventState, msg.ID)
 				}
-
 				c.eventStateMu.Unlock()
+
 				cancel()
 				return nil
 			}
 		case <-ctx.Done():
-			return fmt.Errorf("timeout has been reached")
+			return errors.New("timeout has been reached")
 		}
 	}
 }
