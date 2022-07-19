@@ -60,51 +60,45 @@ func (c *Controller) RestoreStatus() error {
 			envs[parts[0]] = parts[1]
 		}
 
-		var (
-			address        string
-			login          uint64
-			password       string
-			publicExchange string
-			rpcQueue       string
-		)
-
-		if v, ok := envs["AMQP_PUBLISH_EXCHANGE"]; ok {
-			publicExchange = v
-		} else {
-			c.log.Error("Couldn't read AMQP_PUBLISH_EXCHANGE env from container: ", id)
+		address, ok := envs["MT_ADDRESS"]
+		if !ok {
+			c.log.Error("MT_ADDRESS env not found on container: ", id)
 			continue
 		}
 
-		if v, ok := envs["AMQP_RPC_QUEUE"]; ok {
-			rpcQueue = v
-		} else {
-			c.log.Error("Couldn't read AMQP_RPC_QUEUE env from container: ", id)
+		loginValue, ok := envs["MT_LOGIN"]
+		if !ok {
+			c.log.Error("MT_LOGIN env not found on container: ", id)
+			continue
+		}
+		login, err := strconv.ParseUint(loginValue, 10, 64)
+		if !ok {
+			c.log.Error("MT_LOGIN env value is not numeric on container: ", id)
 			continue
 		}
 
-		if v, ok := envs["MT_ADDRESS"]; ok {
-			address = v
-		} else {
-			c.log.Error("Couldn't read MT_ADDRESS env from container: ", id)
+		password, ok := envs["MT_PASSWORD"]
+		if !ok {
+			c.log.Error("MT_PASSWORD env not found on container: ", id)
 			continue
 		}
 
-		if v, ok := envs["MT_LOGIN"]; ok {
-			login, _ = strconv.ParseUint(v, 10, 64)
-		} else {
-			c.log.Error("Couldn't read MT_LOGIN env from container: ", id)
+		publicExchange, ok := envs["AMQP_PUBLISH_EXCHANGE"]
+		if !ok {
+			c.log.Error("AMQP_PUBLISH_EXCHANGE env not found on container: ", id)
 			continue
 		}
 
-		if v, ok := envs["MT_PASSWORD"]; ok {
-			password = v
-		} else {
-			c.log.Error("Couldn't read MT_PASSWORD env from container: ", id)
+		rpcQueue, ok := envs["AMQP_RPC_QUEUE"]
+		if !ok {
+			c.log.Error("AMQP_RPC_QUEUE env not found on container: ", id)
 			continue
 		}
 
-		// TODO: process error
 		anvilHash, err := anvilHash(address, login, password)
+		if err != nil {
+			return err
+		}
 
 		hl, err := c.docker.HealthStatus(id)
 		if err != nil {
@@ -134,9 +128,11 @@ func (c *Controller) RestoreStatus() error {
 			},
 			status: status,
 		}
+
 		c.anvilMutex.Lock()
 		c.anvils[id] = &anvil
 		c.anvilMutex.Unlock()
+
 		c.log.Debug("Add anvil with hash:", anvilHash)
 	}
 	return nil
