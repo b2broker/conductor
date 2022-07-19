@@ -1,10 +1,10 @@
 package docker
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/events"
 )
 
@@ -100,23 +100,24 @@ func (c *Controller) RestoreStatus() error {
 			return err
 		}
 
-		hl, err := c.docker.HealthStatus(id)
+		health, err := c.docker.HealthStatus(id)
 		if err != nil {
-			c.log.Error("Couldn't get health status of container: ", id)
+			c.log.Error("can't get health status of container: ", id)
 			continue
 		}
-		fmt.Println("Restore status: ", hl)
+
 		status := Stopped
-		if hl == "healthy" {
+		switch health {
+		case types.Healthy:
 			status = Healthy
-		} else if hl == "starting" {
+		case types.Starting:
 			status = Starting
-		} else if hl == "unhealthy" {
+		case types.Unhealthy:
 			status = Stopped
-			c.log.Debug("anvil status stopped: ", hl)
+			c.log.Debug("status stopped: ", health)
 			continue
-		} else {
-			c.log.Debug("Unknown anvil status: ", hl)
+		default:
+			c.log.Debug("unknown container status: ", health)
 			continue
 		}
 
@@ -133,7 +134,7 @@ func (c *Controller) RestoreStatus() error {
 		c.anvils[id] = &anvil
 		c.anvilMutex.Unlock()
 
-		c.log.Debug("Add anvil with hash:", anvilHash)
+		c.log.Debug("anvil with hash: ", anvilHash, " added")
 	}
 	return nil
 }

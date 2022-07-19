@@ -123,12 +123,10 @@ func (d *Client) Events(onEvent func(message events.Message), onError func(err e
 }
 
 func (d *Client) HealthStatus(id string) (string, error) {
-
 	res, err := d.cli.ContainerInspect(d.ctx, id)
 	if err != nil {
 		return "", err
 	}
-
 	return res.State.Health.Status, nil
 }
 
