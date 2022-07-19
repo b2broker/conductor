@@ -118,7 +118,6 @@ func (c *Controller) processCreate(msg amqp.Delivery) {
 }
 
 func (c *Controller) processResources(corId string, replyTo string) {
-
 	anvils := c.Status()
 	c.sendResourcesResponse(anvils, corId, replyTo)
 }
@@ -360,5 +359,4 @@ func (c *Controller) Status() []AnvilResource {
 	}
 
 	return anvils
-
 }

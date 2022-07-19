@@ -184,33 +184,32 @@ func prepareCreateResponse(anvilQueues Queues, errorStr string) ([]byte, error) 
 }
 
 func prepareResourcesResponse(anvils []AnvilResource) ([]byte, error) {
-
-	st := conductor.Resources{}
+	states := conductor.Resources{}
 
 	for _, anvil := range anvils {
-
 		channel := conductor.Channel{
 			RpcQueue:    []byte(anvil.queues.rpcQueue),
 			PubExchange: []byte(anvil.queues.publishExchange),
 		}
+
 		status := conductor.ResourceStatus_STOPPED
 		if anvil.status == Starting {
 			status = conductor.ResourceStatus_STARTING
 		} else if anvil.status == Healthy {
-			status = conductor.ResourceStatus_STARTING
+			status = conductor.ResourceStatus_HEALTHY
 		}
+
 		resourceStatus := conductor.ResourceStatus{
 			Channel: &channel,
 			Status:  status,
 		}
-		st.Statuses = append(st.Statuses, &resourceStatus)
-
+		states.Statuses = append(states.Statuses, &resourceStatus)
 	}
 
-	bytes, err := proto.Marshal(&st)
-	if err != nil {
-		return nil, err
-	}
+	bytes, err := proto.Marshal(&states)
+	if err == nil {
+		return bytes, nil
 
-	return bytes, nil
+	}
+	return nil, err
 }
