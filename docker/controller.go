@@ -68,7 +68,7 @@ func (c *Controller) findOrCreate(request AnvilRequest) (Queues, error) {
 
 	c.log.Debugf("start the anvil %d@%s", request.login, request.server)
 
-	err = c.StartAndWait(request, hash)
+	id, anvil, err := c.StartAndWait(request, hash)
 	if err != nil {
 		c.log.Error("error while start Anvil", err)
 		return Queues{}, err
@@ -136,14 +136,14 @@ func (c *Controller) processResources(corId string, replyTo string) {
 	c.sendResourcesResponse(anvils, corId, replyTo)
 }
 
-func (c *Controller) Handler(amqpMsg amqp.Delivery) {
+func (c *Controller) Handler(msg amqp.Delivery) {
 	c.log.Debugw(
 		"got request",
-		"Corr: ", amqpMsg.CorrelationId,
-		"ReplyTo: ", amqpMsg.ReplyTo,
+		"Corr: ", msg.CorrelationId,
+		"ReplyTo: ", msg.ReplyTo,
 	)
 
-	path, ok := amqpMsg.Headers["endpoint"]
+	path, ok := msg.Headers["endpoint"]
 	if !ok {
 		return
 	}
@@ -151,14 +151,14 @@ func (c *Controller) Handler(amqpMsg amqp.Delivery) {
 	c.log.Debug("endpoint: ", path)
 	switch path {
 	case "ConductorService.Attach":
-		go c.processCreate(amqpMsg)
+		go c.processCreate(msg)
 	case "ConductorService.Detach":
-		requestedAnvil, err := parseRequest(amqpMsg)
+		requestedAnvil, err := parseRequest(msg)
 		if err == nil {
-			c.processStop(requestedAnvil, amqpMsg.CorrelationId, amqpMsg.ReplyTo)
+			c.processStop(requestedAnvil, msg.CorrelationId, msg.ReplyTo)
 		}
 	case "ConductorService.List":
-		c.processResources(amqpMsg.CorrelationId, amqpMsg.ReplyTo)
+		c.processResources(msg.CorrelationId, msg.ReplyTo)
 	default:
 		c.log.Debug("requested endpoint not served")
 	}
@@ -173,7 +173,7 @@ func (c *Controller) PullAnvil() error {
 	return nil
 }
 
-func (c *Controller) startAnvil(request AnvilRequest) (string, Queues, error) {
+func (c *Controller) createAnvil(request AnvilRequest) (id string, queues Queues, err error) {
 	rpcQueue := uuid.New().String()
 	pubExchange := uuid.New().String()
 
@@ -187,24 +187,23 @@ func (c *Controller) startAnvil(request AnvilRequest) (string, Queues, error) {
 		fmt.Sprintf("AMQP_PUBLISH_EXCHANGE=%s", pubExchange),
 	}
 
-	id, err := c.docker.Create(c.settings.ImgRef, envs)
-	if err != nil {
-		c.log.Errorw("can't create container", "error", err)
-		return "", Queues{}, err
-	}
+	id, err = c.docker.Create(c.settings.ImgRef, envs)
 
-	_, err = c.docker.Start(id, c.settings.NetworkName)
-	if err != nil {
-		c.log.Errorw("can't start container", "error", err)
-		return "", Queues{}, err
-	}
-
-	queues := Queues{
+	queues = Queues{
 		rpcQueue:        rpcQueue,
 		publishExchange: pubExchange,
 	}
 
-	return id, queues, nil
+	return
+}
+
+func (c *Controller) startAnvil(id string) error {
+	_, err := c.docker.Start(id, c.settings.NetworkName)
+	if err != nil {
+		c.log.Errorw("can't start container", "error", err)
+		return err
+	}
+	return nil
 }
 
 func (c *Controller) reply(answer []byte, corId string, replyTo string) error {
@@ -226,7 +225,10 @@ func (c *Controller) reply(answer []byte, corId string, replyTo string) error {
 }
 
 func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan events.Message, error) {
-	id, queues, err := c.startAnvil(request)
+	// if err != nil {
+	// 	c.log.Errorw("can't create container", "error", err)
+	// 	return "", Queues{}, err
+	// }
 
 	c.eventStateMu.Lock()
 	defer c.eventStateMu.Unlock()
@@ -257,21 +259,48 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *Anvil, error) {
 	id, anvil, err := c.findAnvil(hash)
 	if err == nil {
+		// Found
 		// TODO: probably it is not in a running stance
 		return id, anvil, nil
 	}
 
-	// TODO: check status
-	ch, err := c.createNewAnvil(request, hash)
+	id, queues, err := c.createAnvil(request)
 	if err != nil {
-		c.log.Error("anvil error on creation: ", err)
-		return "", nil, err
+		// Can't create new instance
 	}
 
-	c.log.Debug("Waiting for healthstatus")
-	//ctx, cancel := context.WithTimeout(context.Background(), time.Minute*1)
+	if err := c.startAnvil(id); err != nil {
+		// Can't start new instance
+	}
+
+	// Add new channel to eventState map
+
+	c.eventStateMu.Lock()
+	ch, ok := c.eventState[id]
+	if !ok {
+		ch = make(chan events.Message, 1)
+		c.eventState[id] = ch
+	} else {
+		c.log.Warn("channel for container already exists")
+	}
+	c.eventStateMu.Unlock()
+
+	c.anvilMutex.Lock()
+	c.anvils[id] = &Anvil{
+		credsHash: hash,
+		queues:    queues,
+		status:    Starting,
+	}
+	c.anvilMutex.Unlock()
+
+	c.log.Debug("waiting for healthstatus")
 	c.log.Debug("StartTimeout", c.settings.StartTimeout)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(c.settings.StartTimeout)*time.Minute)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		time.Duration(c.settings.StartTimeout)*time.Minute,
+	)
+
 	return c.WaitTillStart(ctx, ch, cancel)
 }
 
