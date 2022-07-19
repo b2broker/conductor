@@ -46,28 +46,18 @@ func (c *Controller) CleanUp() {
 }
 
 func (c *Controller) RestoreStatus() error {
-	containersConfig, err := c.docker.Containers([]string{c.settings.ImgRef})
+	configs, err := c.docker.Containers([]string{c.settings.ImgRef})
 	if err != nil {
 		return err
 	}
-	for id, config := range containersConfig {
-		// TODO save const
-		if !strings.Contains(config.Image, c.settings.ImgRef) {
-			continue
-		}
-
-		c.log.Debug("Continue with image: ", config.Image)
+	for id, config := range configs {
 		envs := make(map[string]string)
-
-		for _, item := range config.Env {
-			parts := strings.Split(item, "=")
-			if len(parts) != 2 {
+		for _, kv := range config.Env {
+			parts := strings.Split(kv, "=")
+			if len(parts) < 2 {
 				continue
 			}
-			key := parts[0]
-			value := parts[1]
-
-			envs[key] = value
+			envs[parts[0]] = parts[1]
 		}
 
 		var (

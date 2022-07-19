@@ -66,7 +66,9 @@ func main() {
 	dClient := docker.NewClient(context.Background())
 
 	controller := docker.NewController(dClient, rabbit, settings, log)
-	controller.RestoreStatus()
+	if err := controller.RestoreStatus(); err != nil {
+		log.Fatal(err)
+	}
 
 	go rabbit.Read(controller.Handler)
 
