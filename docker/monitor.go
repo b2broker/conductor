@@ -28,12 +28,11 @@ func (c *Controller) updateHealthStatus(msg events.Message) {
 	}
 	c.anvilMutex.Unlock()
 
-	c.CleanUp()
+	// c.CleanUp()
 }
 
 func (c *Controller) CleanUp() {
-
-	c.log.Debug("CleanUp")
+	c.log.Debug("clean up routine")
 	c.RestoreStatus()
 
 	for id, anv := range c.anvils {
@@ -41,11 +40,9 @@ func (c *Controller) CleanUp() {
 			c.anvilMutex.Lock()
 			delete(c.anvils, id)
 			c.anvilMutex.Unlock()
-
 			c.log.Debug("Container with ID: ", id, " was deleted from map")
 		}
 	}
-
 }
 
 func (c *Controller) RestoreStatus() error {
