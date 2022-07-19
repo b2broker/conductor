@@ -226,18 +226,17 @@ func (c *Controller) reply(answer []byte, corId string, replyTo string) error {
 }
 
 func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan events.Message, error) {
-	c.eventStateMu.Lock()
-	defer c.eventStateMu.Unlock()
-
 	id, queues, err := c.startAnvil(request)
 
+	c.eventStateMu.Lock()
+	defer c.eventStateMu.Unlock()
 	if ch, ok := c.eventState[id]; ok {
 		c.log.Warn("channel for container already exists")
 		return ch, nil
 	}
 
-	eventsChan := make(chan events.Message, 1)
-	c.eventState[id] = eventsChan
+	events := make(chan events.Message, 1)
+	c.eventState[id] = events
 
 	if err == nil {
 		c.anvilMutex.Lock()
@@ -250,10 +249,9 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 			status: Starting,
 		}
 		c.anvilMutex.Unlock()
-
 	}
 
-	return eventsChan, err
+	return events, err
 }
 
 func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *Anvil, error) {
@@ -263,6 +261,7 @@ func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *A
 		return id, anvil, nil
 	}
 
+	// TODO: check status
 	ch, err := c.createNewAnvil(request, hash)
 	if err != nil {
 		c.log.Error("anvil error on creation: ", err)
