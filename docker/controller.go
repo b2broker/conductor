@@ -99,19 +99,12 @@ func (c *Controller) processStop(request AnvilRequest, corId string, replyTo str
 	// TODO: we do not track refs
 	c.log.Debug("need to Stop Anvil ", anvil.credsHash)
 
-	errSrt := ""
-
+	errorText := ""
 	err = c.docker.Stop(id)
 	if err != nil {
-		errSrt = err.Error()
-	} else {
-		c.anvilMutex.Lock()
-		delete(c.anvils, id)
-		c.anvilMutex.Unlock()
+		errorText = err.Error()
 	}
-
-	c.sendStopResponse(errSrt, corId, replyTo)
-
+	c.sendStopResponse(errorText, corId, replyTo)
 }
 
 func (c *Controller) processCreate(msg amqp.Delivery) {
