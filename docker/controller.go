@@ -25,14 +25,15 @@ type Settings struct {
 
 type Controller struct {
 	docker   *Client
-	anvils   map[string]*Anvil
 	rabbit   *rabbitmq.Rabbit
-	settings Settings
 	log      *zap.SugaredLogger
+	settings Settings
 
-	eventState   map[string]chan events.Message
+	anvilMutex sync.RWMutex
+	anvils     map[string]*Anvil
+
 	eventStateMu sync.RWMutex
-	anvilMutex   sync.RWMutex
+	eventState   map[string]chan events.Message
 }
 
 func NewController(d *Client, r *rabbitmq.Rabbit, settings Settings, logger *zap.SugaredLogger) *Controller {
@@ -47,26 +48,27 @@ func NewController(d *Client, r *rabbitmq.Rabbit, settings Settings, logger *zap
 }
 
 func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
-
 	c.anvilMutex.RLock()
 	defer c.anvilMutex.RUnlock()
 
-	for dockerId, anvil := range c.anvils {
+	for id, anvil := range c.anvils {
 		if anvil.credsHash == hash {
-			return dockerId, anvil, nil
+			return id, anvil, nil
 		}
 	}
 
-	return "", &Anvil{}, fmt.Errorf("couldn't find Anvil")
-
+	return "", &Anvil{}, fmt.Errorf("anvil can't be found")
 }
 
 func (c *Controller) findOrCreate(request AnvilRequest) (Queues, error) {
+	hash, err := anvilHash(request.server, request.login, request.password)
+	if err != nil {
+		return Queues{}, err
+	}
 
-	hash := anvilHash(request.server, request.login, request.password)
-	c.log.Debugf("start new anvil. server: %s login: %d password: %s", request.server, request.login, request.password)
+	c.log.Debugf("start the anvil %d@%s", request.login, request.server)
 
-	err := c.StartAndWait(request, hash)
+	err = c.StartAndWait(request, hash)
 	if err != nil {
 		c.log.Error("error while start Anvil", err)
 		return Queues{}, err
@@ -88,7 +90,11 @@ func (c *Controller) findOrCreate(request AnvilRequest) (Queues, error) {
 }
 
 func (c *Controller) processStop(request AnvilRequest, corId string, replyTo string) {
-	hash := anvilHash(request.server, request.login, request.password)
+	hash, err := anvilHash(request.server, request.login, request.password)
+	if err != nil {
+		c.log.Error(err)
+		return
+	}
 	id, anvil, err := c.findAnvil(hash)
 
 	if err != nil {
@@ -115,15 +121,12 @@ func (c *Controller) processStop(request AnvilRequest, corId string, replyTo str
 }
 
 func (c *Controller) processCreate(amqpMsg amqp.Delivery) {
-
-	request, err := parseRequest(amqpMsg)
+	requestedAnvil, err := parseRequest(amqpMsg)
 	if err != nil {
-		c.log.Error("Couldn't parse request")
+		c.log.Error(err)
 		return
 	}
-
-	queues, err := c.findOrCreate(request)
-
+	queues, err := c.findOrCreate(requestedAnvil)
 	c.sendStartResponse(queues, amqpMsg.CorrelationId, amqpMsg.ReplyTo, err)
 }
 
@@ -134,24 +137,26 @@ func (c *Controller) processResources(corId string, replyTo string) {
 }
 
 func (c *Controller) Handler(amqpMsg amqp.Delivery) {
+	c.log.Debugw("Got request", "CorId", amqpMsg.CorrelationId, "ReplyTo", amqpMsg.ReplyTo)
 
-	c.log.Debugw("Get request",
-		"CorId", amqpMsg.CorrelationId,
-		"ReplyTo", amqpMsg.ReplyTo)
+	path, ok := amqpMsg.Headers["endpoint"]
+	if !ok {
+		return
+	}
 
-	if v, k := amqpMsg.Headers["endpoint"]; k {
-		c.log.Debug("Endpoint: ", v)
-		if v == "ConductorService.Attach" {
-			go c.processCreate(amqpMsg)
-
-		} else if v == "ConductorService.Detach" {
-			request, err := parseRequest(amqpMsg)
-			if err == nil {
-				c.processStop(request, amqpMsg.CorrelationId, amqpMsg.ReplyTo)
-			}
-		} else if v == "ConductorService.List" {
-			c.processResources(amqpMsg.CorrelationId, amqpMsg.ReplyTo)
+	c.log.Debug("Endpoint: ", path)
+	switch path {
+	case "ConductorService.Attach":
+		go c.processCreate(amqpMsg)
+	case "ConductorService.Detach":
+		requestedAnvil, err := parseRequest(amqpMsg)
+		if err == nil {
+			c.processStop(requestedAnvil, amqpMsg.CorrelationId, amqpMsg.ReplyTo)
 		}
+	case "ConductorService.List":
+		c.processResources(amqpMsg.CorrelationId, amqpMsg.ReplyTo)
+	default:
+		c.log.Debug("requested endpoint not served")
 	}
 }
 
@@ -243,8 +248,8 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 }
 
 func (c *Controller) StartAndWait(request AnvilRequest, hash string) error {
-
 	c.log.Debug("Enter StartAndWait")
+
 	_, _, err := c.findAnvil(hash)
 	if err == nil {
 		c.log.Debug("Anvil found")
@@ -296,26 +301,24 @@ func (c *Controller) WaitTillStart(ctx context.Context, events chan events.Messa
 }
 
 func (c *Controller) EventHandler(msg events.Message) {
-
-	fmt.Println("Docker msg:", msg)
-	c.eventStateMu.Lock()
-	defer c.eventStateMu.Unlock()
 	if msg.ID == "" {
 		return
 	}
 
+	c.eventStateMu.Lock()
+	defer c.eventStateMu.Unlock()
 	ch, ok := c.eventState[msg.ID]
 	if ok {
 		ch <- msg
 		return
 	}
-
+	// TODO: When this will be triggered?
+	// In case not ok previous — means that we don't have such element in the map
 	if strings.Contains(msg.Status, "health_status:") ||
 		strings.Contains(msg.Action, "stop") ||
 		strings.Contains(msg.Action, "die") {
 		c.updateHealthStatus(msg)
 	}
-
 }
 
 func (c *Controller) ErrorHandler(err error) {

@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/client"
 )
@@ -101,14 +102,21 @@ func (d *Client) Stop(id string) error {
 	return nil
 }
 
-func (d *Client) Events(onEvent func(message events.Message), onError func(err error)) {
-	c1, c2 := d.cli.Events(d.ctx, types.EventsOptions{})
+func (d *Client) Events(onEvent func(message events.Message), onError func(err error), images []string) {
+	opts := types.EventsOptions{}
+	opts.Filters = filters.NewArgs()
+	opts.Filters.Add("type", events.ContainerEventType)
+	for _, image := range images {
+		opts.Filters.Add("image", image)
+	}
+
+	events, errors := d.cli.Events(d.ctx, opts)
 
 	for {
 		select {
-		case msg := <-c1:
+		case msg := <-events:
 			onEvent(msg)
-		case err := <-c2:
+		case err := <-errors:
 			onError(err)
 		}
 	}
@@ -124,26 +132,30 @@ func (d *Client) HealthStatus(id string) (string, error) {
 	return res.State.Health.Status, nil
 }
 
-func (d *Client) ReadEnv() map[string]container.Config {
-	containers, err := d.cli.ContainerList(d.ctx, types.ContainerListOptions{})
+func (d *Client) Containers(images []string) (map[string]container.Config, error) {
+	opts := types.ContainerListOptions{All: true}
+	opts.Filters = filters.NewArgs()
+	for _, image := range images {
+		opts.Filters.Add("ancestor", image)
+	}
+
+	containers, err := d.cli.ContainerList(d.ctx, opts)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	containersList := make(map[string]container.Config)
 
-	for _, c := range containers {
-
-		res, err := d.cli.ContainerInspect(d.ctx, c.ID)
+	for _, container := range containers {
+		res, err := d.cli.ContainerInspect(d.ctx, container.ID)
 		if err != nil {
-			fmt.Println("Can't read info about ", c.ID)
+			fmt.Println("info can't be read on container: ", container.ID)
 			continue
 		}
-
-		containersList[c.ID] = *res.Config
+		containersList[container.ID] = *res.Config
 	}
 
-	return containersList
+	return containersList, nil
 }
 
 func AuthSrt(user string, pass string) string {

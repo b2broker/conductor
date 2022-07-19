@@ -10,7 +10,6 @@ import (
 
 func (c *Controller) updateHealthStatus(msg events.Message) {
 	c.anvilMutex.Lock()
-
 	if anv, ok := c.anvils[msg.ID]; ok {
 		if strings.Contains(msg.Status, "healthy") {
 			anv.status = Healthy
@@ -21,7 +20,7 @@ func (c *Controller) updateHealthStatus(msg events.Message) {
 			anv.status = Starting
 		} else {
 			anv.status = Stopped
-			c.log.Debug("Now container is stoped")
+			c.log.Debug("Now container is stopped")
 		}
 	}
 	c.anvilMutex.Unlock()
@@ -46,13 +45,14 @@ func (c *Controller) CleanUp() {
 
 }
 
-func (c *Controller) RestoreStatus() {
-	containersConfig := c.docker.ReadEnv()
-
+func (c *Controller) RestoreStatus() error {
+	containersConfig, err := c.docker.Containers([]string{c.settings.ImgRef})
+	if err != nil {
+		return err
+	}
 	for id, config := range containersConfig {
-
 		// TODO save const
-		if !strings.Contains(config.Image, "anvil") {
+		if !strings.Contains(config.Image, c.settings.ImgRef) {
 			continue
 		}
 
@@ -113,7 +113,8 @@ func (c *Controller) RestoreStatus() {
 			continue
 		}
 
-		anvilHash := anvilHash(address, login, password)
+		// TODO: process error
+		anvilHash, err := anvilHash(address, login, password)
 
 		hl, err := c.docker.HealthStatus(id)
 		if err != nil {
@@ -148,5 +149,5 @@ func (c *Controller) RestoreStatus() {
 		c.anvilMutex.Unlock()
 		c.log.Debug("Add anvil with hash:", anvilHash)
 	}
-
+	return nil
 }

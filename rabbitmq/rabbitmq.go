@@ -68,12 +68,9 @@ func (r *Rabbit) Stop() {
 func (r *Rabbit) Read(onMsg func(amqp.Delivery)) {
 	for {
 		for message := range r.consume {
-			//message.Ack(false)
-			fmt.Println("Get rabbit message")
 			onMsg(message)
 		}
 	}
-
 }
 
 func (r *Rabbit) ExchangeRead(exchangeName string, onMsg func(amqp.Delivery)) error {

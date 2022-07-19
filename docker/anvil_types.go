@@ -1,7 +1,7 @@
 package docker
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -53,52 +53,55 @@ type AnvilRequest struct {
 
 func parseRequest(amqpMsg amqp.Delivery) (AnvilRequest, error) {
 	protoMsg := &conductor.ResourceRequest{}
-
-	msg := amqpMsg.Body
-	err := proto.Unmarshal(msg, protoMsg)
+	err := proto.Unmarshal(amqpMsg.Body, protoMsg)
 	if err != nil {
 		return AnvilRequest{}, err
 	}
 
-	anvilRequest := AnvilRequest{}
-
-	if protoMsg.ResourceType == conductor.ResourceRequest_METATRADER_4 {
-		anvilRequest.version = MT4
-	} else if protoMsg.ResourceType == conductor.ResourceRequest_METATRADER_5 {
-		anvilRequest.version = MT5
-	} else {
-		return AnvilRequest{}, fmt.Errorf("unknown recource")
+	var version MetaTraderVersion
+	switch protoMsg.ResourceType {
+	case conductor.ResourceRequest_METATRADER_4:
+		version = MT4
+	case conductor.ResourceRequest_METATRADER_5:
+		version = MT5
+	default:
+		return AnvilRequest{}, fmt.Errorf("unknown resource")
 	}
 
-	if v, ok := protoMsg.Params["server"]; ok {
-		anvilRequest.server = v
-	} else {
+	server, ok := protoMsg.Params["server"]
+	if !ok {
 		return AnvilRequest{}, fmt.Errorf("request doesn't contain server")
 	}
 
-	if v, ok := protoMsg.Params["login"]; ok {
-		anvilRequest.login, err = strconv.ParseUint(v, 10, 64)
-		if err != nil {
-			return AnvilRequest{}, fmt.Errorf("request contains incorrect login")
-		}
-	} else {
+	login, ok := protoMsg.Params["login"]
+	if !ok {
 		return AnvilRequest{}, fmt.Errorf("request doesn't contain login")
 	}
 
-	if v, ok := protoMsg.Params["password"]; ok {
-		anvilRequest.password = v
-	} else {
+	password, ok := protoMsg.Params["password"]
+	if !ok {
 		return AnvilRequest{}, fmt.Errorf("request doesn't contain password")
 	}
 
-	return anvilRequest, nil
+	loginValue, err := strconv.ParseUint(login, 10, 64)
+	if err != nil {
+		return AnvilRequest{}, fmt.Errorf("request contains incorrect login")
+	}
+
+	return AnvilRequest{
+		version:  version,
+		server:   server,
+		login:    loginValue,
+		password: password,
+	}, nil
 }
 
-func anvilHash(server string, login uint64, password string) string {
-	h := sha1.New()
-	h.Write([]byte(fmt.Sprintf("%s%d%s", server, login, password)))
-	hash := hex.EncodeToString(h.Sum(nil))
-	return hash
+func anvilHash(server string, login uint64, password string) (string, error) {
+	hasher := sha256.New()
+	if _, err := hasher.Write([]byte(fmt.Sprintf("%s%d%s", server, login, password))); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func prepareStopResponse(errorStr string) ([]byte, error) {

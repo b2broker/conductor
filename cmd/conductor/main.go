@@ -12,18 +12,17 @@ import (
 )
 
 func main() {
-
 	rawJSON := []byte(`{
-   "level": "debug",
-   "encoding": "json",
-   "outputPaths": ["stdout"],
-   "errorOutputPaths": ["stderr"],
-   "encoderConfig": {
-     "messageKey": "message",
-     "levelKey": "level",
-     "levelEncoder": "lowercase"
-   }
- }`)
+	"level": "debug",
+	"encoding": "json",
+	"outputPaths": ["stdout"],
+	"errorOutputPaths": ["stderr"],
+	"encoderConfig": {
+		"messageKey": "message",
+		"levelKey": "level",
+		"levelEncoder": "lowercase"
+	}
+}`)
 	var cfg zap.Config
 	if err := json.Unmarshal(rawJSON, &cfg); err != nil {
 		panic(err)
@@ -32,7 +31,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-
 	defer logger.Sync() // flushes buffer, if any
 	log := logger.Sugar()
 
@@ -59,12 +57,6 @@ func main() {
 		StartTimeout:     startTimeout,
 	}
 
-	//TODO закрытие соединения
-	//connectRabbitMQ, err := rabbitmq.Dial(amqpHost)
-	//if err != nil {
-	//	log.Panicf("could not connect to amqp: %v", err)
-	//}
-
 	rabbit, err := rabbitmq.NewRabbit(amqpHost, amqpQueue, false)
 	if err != nil {
 		log.Panicf("could not connect to rabbit: %v", err)
@@ -74,25 +66,9 @@ func main() {
 	dClient := docker.NewClient(context.Background())
 
 	controller := docker.NewController(dClient, rabbit, settings, log)
-	//err = controller.PullAnvil()
-	//if err != nil {
-	//	log.Panicf("could not pull image: %v", err)
-	//}
 	controller.RestoreStatus()
 
 	go rabbit.Read(controller.Handler)
 
-	dClient.Events(controller.EventHandler, controller.ErrorHandler)
-
-	//var wg sync.WaitGroup
-	//wg.Add(1)
-	//go func() {
-	//	dClient.Events(controller.EventHandler, controller.ErrorHandler)
-	//	wg.Done()
-	//}()
-	//
-	//wg.Wait()
-
-	//	отслеживать сигнал, graceful shutdown
-
+	dClient.Events(controller.EventHandler, controller.ErrorHandler, []string{imgRef})
 }

@@ -21,7 +21,6 @@ type Anvil struct {
 }
 
 func sender(r *rabbitmq.Rabbit, msg []byte, corId string, endpoint string) {
-
 	header := make(map[string]interface{})
 	header["endpoint"] = endpoint
 
@@ -119,12 +118,7 @@ func main() {
 	amqpHost := os.Getenv("AMQP_HOST")
 	amqpQueue := os.Getenv("AMQP_QUEUE")
 
-	connectRabbitMQ, err := amqp.Dial(amqpHost)
-	if err != nil {
-		panic(err)
-	}
-
-	rabbit, err := rabbitmq.NewRabbit(connectRabbitMQ, amqpQueue, true)
+	rabbit, err := rabbitmq.NewRabbit(amqpHost, amqpQueue, true)
 	if err != nil {
 		panic(err)
 	}
