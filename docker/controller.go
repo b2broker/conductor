@@ -96,7 +96,8 @@ func (c *Controller) processStop(request AnvilRequest, corId string, replyTo str
 		return
 	}
 
-	c.log.Debug("Need to Stop Anvil ", anvil.credsHash)
+	// TODO: we do not track refs
+	c.log.Debug("need to Stop Anvil ", anvil.credsHash)
 
 	errSrt := ""
 

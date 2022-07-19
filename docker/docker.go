@@ -99,18 +99,7 @@ func (d *Client) NetworkConnect(networkName string, containerID string) error {
 }
 
 func (d *Client) Stop(id string) error {
-	if err := d.cli.ContainerStop(d.ctx, id, nil); err != nil {
-		return err
-	}
-
-	if err := d.cli.ContainerRemove(d.ctx, id, types.ContainerRemoveOptions{
-		RemoveVolumes: true,
-		Force:         true,
-	}); err != nil {
-		return err
-	}
-
-	return nil
+	return d.cli.ContainerStop(d.ctx, id, nil)
 }
 
 func (d *Client) Events(onEvent func(message events.Message), onError func(err error), images []string) {
