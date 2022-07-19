@@ -47,17 +47,17 @@ func NewController(d *Client, r *rabbitmq.Rabbit, settings Settings, logger *zap
 	}
 }
 
-func (c *Controller) findAnvil(hash string) (string, *Anvil, error) {
+func (c *Controller) findAnvil(hash string) (string, *Anvil, bool) {
 	c.anvilMutex.RLock()
 	defer c.anvilMutex.RUnlock()
 
 	for id, anvil := range c.anvils {
 		if anvil.credsHash == hash {
-			return id, anvil, nil
+			return id, anvil, true
 		}
 	}
 
-	return "", &Anvil{}, fmt.Errorf("anvil can't be found")
+	return "", &Anvil{}, false
 }
 
 func (c *Controller) findOrCreate(request AnvilRequest) (Queues, error) {
@@ -68,16 +68,9 @@ func (c *Controller) findOrCreate(request AnvilRequest) (Queues, error) {
 
 	c.log.Debugf("start the anvil %d@%s", request.login, request.server)
 
-	id, anvil, err := c.StartAndWait(request, hash)
+	_, anvil, err := c.StartAndWait(request, hash)
 	if err != nil {
 		c.log.Error("error while start Anvil", err)
-		return Queues{}, err
-	}
-
-	_, anvil, err := c.findAnvil(hash)
-
-	if err != nil {
-		c.log.Error("error after start Anvil", err)
 		return Queues{}, err
 	}
 
@@ -95,11 +88,11 @@ func (c *Controller) processStop(request AnvilRequest, corId string, replyTo str
 		c.log.Error(err)
 		return
 	}
-	id, anvil, err := c.findAnvil(hash)
+	id, anvil, ok := c.findAnvil(hash)
 
-	if err != nil {
-		c.log.Debug("Couldn't stop Anvil. Anvil doesn't exist")
-		c.sendStopResponse(err.Error(), corId, replyTo)
+	if !ok {
+		c.log.Debug("couldn't stop anvil, it doesn't exist")
+		c.sendStopResponse("anvil couldn't be found", corId, replyTo)
 		return
 	}
 
@@ -207,16 +200,14 @@ func (c *Controller) startAnvil(id string) error {
 }
 
 func (c *Controller) reply(answer []byte, corId string, replyTo string) error {
-
-	fmt.Println("Sent answer. CorId: ", corId, " ReplyTo: ", replyTo)
-
-	amqpMsg := amqp.Publishing{
-		ContentType:   "text/plain",
+	msg := amqp.Publishing{
+		// TODO: Need to ensure about that
+		ContentType:   "application/protobuf",
 		Body:          answer,
 		CorrelationId: corId,
 	}
 
-	err := c.rabbit.ReplyTo(amqpMsg, replyTo)
+	err := c.rabbit.ReplyTo(msg, replyTo)
 	if err != nil {
 		return err
 	}
@@ -257,9 +248,11 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 }
 
 func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *Anvil, error) {
-	id, anvil, err := c.findAnvil(hash)
-	if err == nil {
-		// Found
+	id, anvil, ok := c.findAnvil(hash)
+	if ok {
+		if anvil.status != Healthy {
+
+		}
 		// TODO: probably it is not in a running stance
 		return id, anvil, nil
 	}

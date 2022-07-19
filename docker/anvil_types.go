@@ -106,27 +106,25 @@ func anvilHash(server string, login uint64, password string) (string, error) {
 
 func prepareStopResponse(errorStr string) ([]byte, error) {
 	stopResponse := conductor.DetachResponse{Error: errorStr}
-
 	bytes, err := proto.Marshal(&stopResponse)
-	if err != nil {
-		return nil, err
+	if err == nil {
+		return bytes, nil
 	}
-	return bytes, nil
+	return nil, err
 }
 
 func (c *Controller) sendStopResponse(errorStr string, corId string, replyTo string) {
 	response, err := prepareStopResponse(errorStr)
 	if err != nil {
-		c.log.Error("Error while prepare stop response")
+		c.log.Fatal("error while prepare stop response")
 		return
 	}
 
 	err = c.reply(response, corId, replyTo)
 	if err != nil {
-		c.log.Error("Couldn't send stop response")
+		c.log.Fatal("couldn't send stop response")
 		return
 	}
-	return
 }
 
 func (c *Controller) sendStartResponse(queues Queues, corId string, replyTo string, err error) {

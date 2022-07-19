@@ -120,14 +120,12 @@ func (r *Rabbit) ExchangeRead(exchangeName string, onMsg func(amqp.Delivery)) er
 }
 
 func (r *Rabbit) ReplyTo(msg amqp.Publishing, replyTo string) error {
-	err := r.channel.Publish(
+	return r.channel.Publish(
 		"",      // exchange
 		replyTo, // routing key
 		false,   // mandatory
 		false,   // immediate
 		msg)
-
-	return err
 }
 
 func (r *Rabbit) Publish(msg amqp.Publishing) error {
