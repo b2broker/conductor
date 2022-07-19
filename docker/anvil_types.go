@@ -153,18 +153,17 @@ func (c *Controller) sendResourcesResponse(anvils []AnvilResource, corId string,
 	response, err := prepareResourcesResponse(anvils)
 
 	if err != nil {
-		c.log.Error("Can't prepare answer")
+		c.log.Error("answer can't be prepared")
 		return
 	}
 
 	err = c.reply(response, corId, replyTo)
 	if err != nil {
-		c.log.Error("Couldn't send answer")
+		c.log.Error("answer wasn't send")
 		return
 	}
-	c.log.Debug("List Anvil Send Answer")
-
 }
+
 func prepareCreateResponse(anvilQueues Queues, errorStr string) ([]byte, error) {
 	channel := conductor.Channel{
 		RpcQueue:    []byte(anvilQueues.rpcQueue),
