@@ -122,6 +122,7 @@ func (c *Controller) sendStopResponse(errorStr string, corId string, replyTo str
 
 	err = c.reply(response, corId, replyTo)
 	if err != nil {
+		c.log.Error(err)
 		c.log.Fatal("couldn't send stop response")
 		return
 	}
