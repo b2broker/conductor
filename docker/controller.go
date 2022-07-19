@@ -120,14 +120,14 @@ func (c *Controller) processStop(request AnvilRequest, corId string, replyTo str
 
 }
 
-func (c *Controller) processCreate(amqpMsg amqp.Delivery) {
-	requestedAnvil, err := parseRequest(amqpMsg)
+func (c *Controller) processCreate(msg amqp.Delivery) {
+	requestedAnvil, err := parseRequest(msg)
 	if err != nil {
 		c.log.Error(err)
 		return
 	}
 	queues, err := c.findOrCreate(requestedAnvil)
-	c.sendStartResponse(queues, amqpMsg.CorrelationId, amqpMsg.ReplyTo, err)
+	c.sendStartResponse(queues, msg.CorrelationId, msg.ReplyTo, err)
 }
 
 func (c *Controller) processResources(corId string, replyTo string) {
@@ -137,14 +137,18 @@ func (c *Controller) processResources(corId string, replyTo string) {
 }
 
 func (c *Controller) Handler(amqpMsg amqp.Delivery) {
-	c.log.Debugw("Got request", "CorId", amqpMsg.CorrelationId, "ReplyTo", amqpMsg.ReplyTo)
+	c.log.Debugw(
+		"got request",
+		"Corr: ", amqpMsg.CorrelationId,
+		"ReplyTo: ", amqpMsg.ReplyTo,
+	)
 
 	path, ok := amqpMsg.Headers["endpoint"]
 	if !ok {
 		return
 	}
 
-	c.log.Debug("Endpoint: ", path)
+	c.log.Debug("endpoint: ", path)
 	switch path {
 	case "ConductorService.Attach":
 		go c.processCreate(amqpMsg)
@@ -170,31 +174,37 @@ func (c *Controller) PullAnvil() error {
 }
 
 func (c *Controller) startAnvil(request AnvilRequest) (string, Queues, error) {
-
-	c.log.Debug("startAnvil")
 	rpcQueue := uuid.New().String()
-	publishExchange := uuid.New().String()
+	pubExchange := uuid.New().String()
 
-	env := []string{fmt.Sprintf("MT_ADDRESS=%s", request.server),
+	envs := []string{
+		fmt.Sprintf("MT_ADDRESS=%s", request.server),
 		fmt.Sprintf("MT_LOGIN=%d", request.login),
 		fmt.Sprintf("MT_PASSWORD=%s", request.password),
+		// TODO: should be fixed, not dsn but HOST required
 		fmt.Sprintf("AMQP_HOST=%s", c.settings.AmqpExternalName),
 		fmt.Sprintf("AMQP_RPC_QUEUE=%s", rpcQueue),
-		fmt.Sprintf("AMQP_PUBLISH_EXCHANGE=%s", publishExchange)}
+		fmt.Sprintf("AMQP_PUBLISH_EXCHANGE=%s", pubExchange),
+	}
 
-	resID, err := c.docker.Start(c.settings.ImgRef, env, c.settings.NetworkName)
+	id, err := c.docker.Create(c.settings.ImgRef, envs)
 	if err != nil {
-		c.log.Errorw("Can't start container", "error", err.Error())
+		c.log.Errorw("can't create container", "error", err)
+		return "", Queues{}, err
+	}
+
+	_, err = c.docker.Start(id, c.settings.NetworkName)
+	if err != nil {
+		c.log.Errorw("can't start container", "error", err)
 		return "", Queues{}, err
 	}
 
 	queues := Queues{
 		rpcQueue:        rpcQueue,
-		publishExchange: publishExchange,
+		publishExchange: pubExchange,
 	}
 
-	c.log.Debug("Return from startAnvil")
-	return resID, queues, nil
+	return id, queues, nil
 }
 
 func (c *Controller) reply(answer []byte, corId string, replyTo string) error {
@@ -219,24 +229,23 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 	c.eventStateMu.Lock()
 	defer c.eventStateMu.Unlock()
 
-	c.log.Debug("before startAnvil")
-	anvilID, anvilQueues, err := c.startAnvil(request)
+	id, queues, err := c.startAnvil(request)
 
-	if ch, ok := c.eventState[anvilID]; ok {
+	if ch, ok := c.eventState[id]; ok {
 		c.log.Warn("channel for container already exists")
 		return ch, nil
 	}
 
 	eventsChan := make(chan events.Message, 1)
-	c.eventState[anvilID] = eventsChan
+	c.eventState[id] = eventsChan
 
 	if err == nil {
 		c.anvilMutex.Lock()
-		c.anvils[anvilID] = &Anvil{
+		c.anvils[id] = &Anvil{
 			credsHash: hash,
 			queues: Queues{
-				rpcQueue:        anvilQueues.rpcQueue,
-				publishExchange: anvilQueues.publishExchange,
+				rpcQueue:        queues.rpcQueue,
+				publishExchange: queues.publishExchange,
 			},
 			status: Starting,
 		}
@@ -247,21 +256,17 @@ func (c *Controller) createNewAnvil(request AnvilRequest, hash string) (chan eve
 	return eventsChan, err
 }
 
-func (c *Controller) StartAndWait(request AnvilRequest, hash string) error {
-	c.log.Debug("Enter StartAndWait")
-
-	_, _, err := c.findAnvil(hash)
+func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *Anvil, error) {
+	id, anvil, err := c.findAnvil(hash)
 	if err == nil {
-		c.log.Debug("Anvil found")
-		return nil
+		// TODO: probably it is not in a running stance
+		return id, anvil, nil
 	}
-
-	c.log.Debug("Before createNewAnvil")
 
 	ch, err := c.createNewAnvil(request, hash)
 	if err != nil {
-		c.log.Error("Create error: ", err)
-		return err
+		c.log.Error("anvil error on creation: ", err)
+		return "", nil, err
 	}
 
 	c.log.Debug("Waiting for healthstatus")

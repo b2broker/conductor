@@ -45,33 +45,44 @@ func (d *Client) Pull(imgRef string, authStr string) error {
 	return nil
 }
 
-func (d *Client) Start(img string, env []string, network string) (string, error) {
-	resp, err := d.cli.ContainerCreate(d.ctx, &container.Config{
-		Image: img,
-		Env:   env,
-		Tty:   false,
-	}, &container.HostConfig{
-		RestartPolicy: container.RestartPolicy{
-			Name:              "on-failure",
-			MaximumRetryCount: 3,
+func (d *Client) Create(img string, envs []string) (id string, err error) {
+	info, err := d.cli.ContainerCreate(d.ctx,
+		&container.Config{
+			Image: img,
+			Env:   envs,
+			Tty:   false,
 		},
-	}, nil, nil, "")
+		&container.HostConfig{
+			RestartPolicy: container.RestartPolicy{
+				Name: "unless-stopped",
+			},
+		},
+		// TODO: shouldn't we describe network here?
+		nil,
+		nil,
+		// TODO: It's appropriate to name container anvil-{version}-{login}-{host}
+		"",
+	)
 	if err != nil {
-		return "", err
+		return
 	}
+	id = info.ID
+	return
+}
 
+func (d *Client) Start(id string, network string) (string, error) {
 	if network != "" {
-		err = d.NetworkConnect(network, resp.ID)
+		err := d.NetworkConnect(network, id)
 		if err != nil {
 			return "", err
 		}
 	}
 
-	if err := d.cli.ContainerStart(d.ctx, resp.ID, types.ContainerStartOptions{}); err != nil {
+	if err := d.cli.ContainerStart(d.ctx, id, types.ContainerStartOptions{}); err != nil {
 		return "", err
 	}
 
-	return resp.ID, nil
+	return id, nil
 }
 
 func (d *Client) NetworkConnect(networkName string, containerID string) error {
