@@ -244,13 +244,14 @@ func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *A
 	}
 
 	if anvil.status == Stopped {
+		ch = make(chan events.Message, 1)
 		if err := c.startAnvil(id); err != nil {
 			return "", nil, err
 		}
 	}
 
 	c.log.Debug("waiting for healthstatus")
-	c.log.Debug("StartTimeout", c.settings.StartTimeout)
+	c.log.Debug("StartTimeout ", c.settings.StartTimeout)
 
 	ctx, cancel := context.WithTimeout(
 		context.Background(),
