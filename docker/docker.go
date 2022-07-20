@@ -54,7 +54,8 @@ func (d *Client) Create(img string, envs []string) (id string, err error) {
 		},
 		&container.HostConfig{
 			RestartPolicy: container.RestartPolicy{
-				Name: "unless-stopped",
+				Name:              "on-failure",
+				MaximumRetryCount: 100,
 			},
 		},
 		// TODO: shouldn't we describe network here?
