@@ -225,7 +225,7 @@ func (c *Controller) StartAndWait(request AnvilRequest, hash string) (string, *A
 		}
 
 		c.eventStateMu.Lock()
-		ch, ok := c.eventState[id]
+		ch, ok = c.eventState[id]
 		if !ok {
 			ch = make(chan events.Message, 1)
 			c.eventState[id] = ch
