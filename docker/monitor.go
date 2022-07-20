@@ -72,7 +72,7 @@ func (c *Controller) RestoreStatus() error {
 			continue
 		}
 		login, err := strconv.ParseUint(loginValue, 10, 64)
-		if !ok {
+		if err != nil {
 			c.log.Error("MT_LOGIN env value is not numeric on container: ", id)
 			continue
 		}
@@ -113,6 +113,7 @@ func (c *Controller) RestoreStatus() error {
 		case types.Starting:
 			status = Starting
 		case types.Unhealthy:
+		case string(Stopped):
 			status = Stopped
 		default:
 			c.log.Debug("unknown container status: ", health)

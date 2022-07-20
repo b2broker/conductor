@@ -86,12 +86,20 @@ func (d *Client) Start(id string, network string) (string, error) {
 }
 
 func (d *Client) NetworkConnect(networkName string, containerID string) error {
+	instance, err := d.cli.ContainerInspect(d.ctx, containerID)
+	if err != nil {
+		return err
+	}
+	if _, ok := instance.NetworkSettings.Networks[networkName]; ok {
+		return nil
+	}
+
 	settings := network.EndpointSettings{
 		Links:     []string{"rabbitmq"},
 		NetworkID: networkName,
 	}
 
-	err := d.cli.NetworkConnect(d.ctx, networkName, containerID, &settings)
+	err = d.cli.NetworkConnect(d.ctx, networkName, containerID, &settings)
 	if err != nil {
 		return err
 	}
@@ -127,6 +135,10 @@ func (d *Client) HealthStatus(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if res.State.Health == nil {
+		return string(Stopped), nil
+	}
+
 	return res.State.Health.Status, nil
 }
 
